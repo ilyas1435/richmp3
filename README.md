@@ -77,6 +77,9 @@ python -m richmp3 --version
 ## Quick start
 
 ```bash
+# Friendly menu for speech quality and phone-safe download settings
+python -m richmp3 --wizard
+
 # Default: MP3, ABR 24 kbps, 11025 Hz, mono, ZIP enabled
 richmp3 "https://www.youtube.com/playlist?list=..."
 
@@ -98,6 +101,18 @@ richmp3 --limit-rate 300k --workers 2 URL
 # Restricted / age-gated media
 richmp3 --cookies ~/cookies.txt URL
 ```
+
+The wizard offers MP3 speech presets, phone workload presets, an output
+directory and an optional ZIP. Its recommended lecture profile is mono MP3
+CBR at 24 kbps and 11025 Hz, with a conservative two download workers and one
+encoder. The smaller 16 kbps profile saves more space but reduces speech
+clarity. MP3 is chosen instead of Opus for broader compatibility with older
+players. Wizard choices apply to that run; normal configuration-file and CLI
+options remain available.
+
+Track-row percentages show progress within that track's current phase.
+Overall run progress also accounts for later conversion and cleanup work, so
+it can stay near 62% after a download finishes and the audio is being encoded.
 
 Exit codes: `0` success, `1` one or more failures, `2` setup error
 (missing FFmpeg, bad options), `130` interrupted.

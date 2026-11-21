@@ -88,6 +88,17 @@ class Track:
         return _START_PROGRESS.get(self.stage, 0.0)
 
     @property
+    def stage_progress(self) -> float:
+        """Progress within the currently displayed stage, from 0.0 to 1.0."""
+        if self.stage is Stage.DOWNLOADING:
+            return self.download_fraction
+        if self.stage is Stage.CONVERTING:
+            return self.convert_fraction
+        if self.stage in _TERMINAL_STAGES:
+            return 1.0
+        return 0.0
+
+    @property
     def stage_label(self) -> str:
         label = self.stage.value
         if self.attempts > 1 and not self.stage.terminal:

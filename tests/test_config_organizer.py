@@ -25,6 +25,22 @@ from richmp3.models import Stage
 
 
 class ConfigTests(unittest.TestCase):
+    def test_track_stage_progress_is_not_overall_weighted_progress(self) -> None:
+        track = Track(
+            index=1,
+            url="u",
+            title="speech",
+            stage=Stage.DOWNLOADING,
+            download_fraction=1.0,
+        )
+        self.assertEqual(track.stage_progress, 1.0)
+        self.assertEqual(track.progress, 0.62)
+
+        track.stage = Stage.CONVERTING
+        track.convert_fraction = 0.03
+        self.assertAlmostEqual(track.stage_progress, 0.03)
+        self.assertAlmostEqual(track.progress, 0.6299)
+
     def test_snap_mp3_11000_to_11025(self) -> None:
         self.assertEqual(snap_sample_rate(11000, "mp3"), 11025)
 

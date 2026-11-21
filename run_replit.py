@@ -6,7 +6,7 @@ import sys
 
 
 def main() -> None:
-    print("RichMP3 — enter a URL and optional command-line flags.")
+    print("RichMP3 — enter a URL, or type :menu for the settings wizard.")
     print("Example: --no-zip https://example.org/audio.mp3")
     print("Type --help for options, or quit to exit.", flush=True)
     while True:
@@ -17,6 +17,13 @@ def main() -> None:
             return
         if line.lower() in {"quit", "exit"}:
             return
+        if line.lower() in {":menu", "menu", "wizard"}:
+            from richmp3.cli import main as richmp3_main
+
+            result = richmp3_main(["--wizard"])
+            if result:
+                print(f"RichMP3 exited with code {result}.")
+            continue
         if not line:
             continue
         try:

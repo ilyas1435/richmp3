@@ -344,12 +344,14 @@ class Dashboard(BaseUI):
         )
 
         stage = Text(track.stage_label, style=f"bold {style}", no_wrap=True)
-        percent = Text(f"{track.progress * 100:3.0f}%", style=style, justify="right")
+        percent = Text(
+            f"{track.stage_progress * 100:3.0f}%", style=style, justify="right"
+        )
 
         if narrow:
             return [idx, title, stage, percent]
         detail = Text(self._detail(track), style="grey54", no_wrap=True)
-        return [idx, title, stage, _bar(track.progress, 12, style), percent, detail]
+        return [idx, title, stage, _bar(track.stage_progress, 12, style), percent, detail]
 
     def _detail(self, track: Track) -> str:
         if track.stage is Stage.DOWNLOADING:

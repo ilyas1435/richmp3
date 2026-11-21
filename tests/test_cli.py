@@ -28,6 +28,11 @@ class CliSettingsTests(unittest.TestCase):
         self.assertEqual(settings.concurrent_fragments, 8)
         self.assertFalse(notices)
 
+    def test_wizard_flag_does_not_require_url(self) -> None:
+        args = self.parse(["--wizard"])
+        self.assertTrue(args.wizard)
+        self.assertEqual(args.urls, [])
+
     def test_flags_override(self) -> None:
         settings, _ = finalize(
             _build_settings(

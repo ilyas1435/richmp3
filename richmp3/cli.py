@@ -46,7 +46,9 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("urls", nargs="+", help="playlist, channel or track URL(s)")
+    parser.add_argument(
+        "urls", nargs="*", help="playlist, channel or track URL(s)"
+    )
     parser.add_argument(
         "-o", "--output", default=None,
         help="output directory (default: ./downloads)",
@@ -169,6 +171,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--config", default=None,
         help="TOML config file (default: ./richmp3.toml or ~/.config/richmp3/config.toml)",
     )
+    parser.add_argument(
+        "--wizard",
+        action="store_true",
+        help="choose speech compression and phone download settings interactively",
+    )
     parser.add_argument("--version", action="version", version=f"richmp3 {__version__}")
     return parser
 
@@ -178,6 +185,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     console = Console(highlight=False)
 
+    wizard_settings: dict[str, object] = {}
+    if args.wizard:
+        from .interactive import configure_interactively
+
+        try:
+            result = configure_interactively()
+        except KeyboardInterrupt:
+            console.print("\nتم إلغاء الإعداد.")
+            return 130
+        except EOFError:
+            console.print("\nانتهى الإدخال قبل إدخال الروابط.")
+            return 130
+        if result is None:
+            return 0
+        wizard_urls, wizard_settings = result
+        args.urls = wizard_urls
+    elif not args.urls:
+        parser.error("provide at least one URL, or use --wizard")
+
     try:
         config_file = Path(args.config) if args.config else config_path_default()
         config: dict[str, Any] = {}
@@ -185,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
             if not config_file.is_file():
                 parser.error(f"config file not found: {config_file}")
             config = load_config(config_file)
+        config.update(wizard_settings)
         settings = _build_settings(args, config)
         settings, notices = finalize(settings)
     except (ValueError, TypeError) as exc:

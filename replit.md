@@ -13,10 +13,14 @@ Keep its existing structure and stack.
 - Alternatively, use Shell:
 
   ```sh
+  python -m richmp3 --wizard
   python -m richmp3 "https://example.org/audio.mp3"
   python -m richmp3 --no-zip -b 64 "https://example.org/audio.mp3"
   python -m richmp3 --help
   ```
+
+The wizard offers speech-focused MP3 quality profiles and phone-friendly
+download settings. In the Run console, enter `:menu` to open it.
 
 The URLs above are placeholders; replace them with media you have permission
 to download. If console input is unavailable, use the Shell commands instead.
