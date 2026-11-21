@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import queue
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Iterator
 
 from .archive import Archiver
 from .config import Settings
@@ -18,7 +20,6 @@ from .organizer import (
     cleanup_temp_dir,
     make_layout,
     mark_skipped,
-    number_width,
     output_path_for,
     prepare_layout,
     remove_folder,
@@ -88,69 +89,100 @@ class Pipeline:
         self.ui.notify(f"Resolving {url}", "info")
 
         try:
-            resolved = self.downloader.resolve(url)
-        except Cancelled:
+            with self.downloader.open_playlist(url) as (
+                title,
+                uploader,
+                entries,
+                expected,
+            ):
+                playlist.title = title
+                playlist.uploader = uploader
+                playlist.stage = Stage.QUEUED
+                self.context.finished = False
+                self.ui.refresh()
+
+                if self.settings.dry_run:
+                    self._plan_only(playlist, entries, expected)
+                    return
+
+                layout = make_layout(self.settings, playlist.title)
+                playlist.directory = layout.playlist_dir
+                playlist.zip_path = layout.zip_path
+                prepare_layout(layout)
+
+                try:
+                    self._stream_tracks(playlist, layout, entries, expected)
+                finally:
+                    try:
+                        self._maybe_zip(playlist, layout)
+                    finally:
+                        cleanup_temp_dir(layout.temp_dir)
+                        try:
+                            if layout.playlist_dir.is_dir() and not any(
+                                layout.playlist_dir.iterdir()
+                            ):
+                                layout.playlist_dir.rmdir()
+                        except OSError:
+                            pass
+                        if playlist.stage not in (
+                            Stage.CANCELLED,
+                            Stage.FAILED,
+                            Stage.ZIPPING,
+                        ):
+                            playlist.stage = Stage.COMPLETED
+                        self.ui.refresh()
+        except (KeyboardInterrupt, Cancelled):
             playlist.stage = Stage.CANCELLED
+            self.context.cancelled = True
             raise
         except Exception as exc:
             playlist.stage = Stage.FAILED
             playlist.error = str(exc)
-            playlist.title = url
-            self.log.error(f"Failed to resolve {url}: {exc}")
-            self.ui.notify(f"Could not resolve {url}: {exc}", "error")
-            return
+            if playlist.title == "Resolving…":
+                playlist.title = url
+            self.log.error(f"Failed to process {url}: {exc}")
+            self.ui.notify(f"Could not process {url}: {exc}", "error")
 
-        playlist.title = resolved.title
-        playlist.uploader = resolved.uploader
-        playlist.tracks = resolved.tracks
-        playlist.stage = Stage.QUEUED
-        self.context.finished = False
-        self.ui.refresh()
-
-        if self.settings.dry_run:
-            self._plan_only(playlist)
-            return
-
+    def _plan_only(
+        self,
+        playlist: Playlist,
+        entries: Iterator[dict],
+        expected: int | None,
+    ) -> None:
         layout = make_layout(self.settings, playlist.title)
         playlist.directory = layout.playlist_dir
         playlist.zip_path = layout.zip_path
-        prepare_layout(layout)
-
-        try:
-            self._run_tracks(playlist, layout)
-        finally:
-            try:
-                self._maybe_zip(playlist, layout)
-            finally:
-                cleanup_temp_dir(layout.temp_dir)
-                try:
-                    if layout.playlist_dir.is_dir() and not any(layout.playlist_dir.iterdir()):
-                        layout.playlist_dir.rmdir()
-                except OSError:
-                    pass
-                if playlist.stage not in (Stage.CANCELLED, Stage.FAILED, Stage.ZIPPING):
-                    playlist.stage = Stage.COMPLETED
-                self.ui.refresh()
-
-    def _plan_only(self, playlist: Playlist) -> None:
-        layout = make_layout(self.settings, playlist.title)
-        playlist.directory = layout.playlist_dir
-        playlist.zip_path = layout.zip_path
-        width = number_width(len(playlist.tracks), self.settings.number_width)
-        for track in playlist.tracks:
+        width = self.settings.number_width or max(4, len(str(expected or 1)))
+        index = 0
+        for entry in entries:
+            if not entry:
+                continue
+            track = self.downloader.track_from_entry(entry, index + 1)
+            if track is None:
+                continue
+            index += 1
+            playlist.tracks.append(track)
             track.output_path = output_path_for(
-                track, layout, len(playlist.tracks), self.settings, width
+                track, layout, expected or index, self.settings, width
             )
         playlist.stage = Stage.COMPLETED
 
-    def _run_tracks(self, playlist: Playlist, layout: Layout) -> None:
-        """Run downloads and encodes as two independent worker pools.
+    def _stream_tracks(
+        self,
+        playlist: Playlist,
+        layout: Layout,
+        entries: Iterator[dict],
+        expected: int | None,
+    ) -> None:
+        """Stream playlist entries into download workers as they arrive.
 
-        A download worker hands each finished file straight to the encoder pool
-        and immediately picks up the next track, so encoding never blocks
-        downloading (and vice versa).  Only the final ZIP waits for both pools.
+        A metadata thread walks yt-dlp's lazy entry list and submits each track
+        immediately.  Download workers report completions on a queue; the main
+        loop forwards finished files to the encoder pool.  Nothing waits for the
+        whole playlist to be enumerated.
         """
-        width = number_width(len(playlist.tracks), self.settings.number_width)
+        width = self.settings.number_width or max(4, len(str(expected or 1)))
+        total_hint = expected or 0
         downloads = ThreadPoolExecutor(
             max_workers=self.settings.download_workers,
             thread_name_prefix="richmp3-dl",
@@ -159,64 +191,149 @@ class Pipeline:
             max_workers=self.settings.convert_workers,
             thread_name_prefix="richmp3-enc",
         )
-        download_futures = {
-            downloads.submit(self._download_track, track, playlist, layout, width): track
-            for track in playlist.tracks
-        }
-        encode_futures: dict[Future, Track] = {}
-        cancelled = False
-        try:
-            for future in as_completed(download_futures):
-                track = download_futures[future]
-                try:
-                    raw = future.result()
-                except Cancelled:
-                    cancelled = True
-                    continue
-                except Exception as exc:  # defensive: _download_track handles errors
-                    track.stage = Stage.FAILED
-                    track.error = str(exc)
-                    self.log.error(f"Unexpected download failure on {track.title}: {exc}")
-                    continue
-                if raw is not None:
-                    encode_futures[
-                        encodes.submit(
-                            self._encode_track,
-                            track,
-                            layout,
-                            raw,
-                            len(playlist.tracks),
-                            width,
-                        )
-                    ] = track
+        events: queue.Queue = queue.Queue()
 
-            for future in as_completed(encode_futures):
-                track = encode_futures[future]
-                try:
-                    future.result()
-                except Cancelled:
+        def download_one(track: Track) -> None:
+            try:
+                raw = self._download_track(track, playlist, layout, width)
+            except BaseException as exc:  # defensive: _download_track handles errors
+                events.put(("download_error", track, exc))
+            else:
+                events.put(("downloaded", track, raw))
+
+        def encode_one(track: Track, raw: Path) -> None:
+            try:
+                self._encode_track(track, layout, raw, total_hint, width)
+            except BaseException as exc:  # defensive: _encode_track handles errors
+                events.put(("encode_error", track, exc))
+            else:
+                events.put(("encoded", track, None))
+
+        def produce() -> None:
+            index = 0
+            try:
+                for entry in entries:
+                    if self.cancel_event.is_set():
+                        break
+                    if not entry:
+                        continue
+                    track = self.downloader.track_from_entry(entry, index + 1)
+                    if track is None:
+                        continue
+                    index += 1
+                    events.put(("track", track, None))
+                    try:
+                        downloads.submit(download_one, track)
+                    except RuntimeError:
+                        # Executor already shutting down after cancellation.
+                        break
+            except Cancelled:
+                pass
+            except Exception as exc:
+                events.put(("metadata_error", None, exc))
+            finally:
+                events.put(("metadata_done", None, None))
+
+        producer = threading.Thread(target=produce, name="richmp3-meta", daemon=True)
+        producer.start()
+
+        tracks_seen = 0
+        downloads_done = 0
+        encodes_submitted = 0
+        encodes_done = 0
+        metadata_done = False
+        metadata_error: Exception | None = None
+        cancelled = False
+
+        def finished() -> bool:
+            return (
+                metadata_done
+                and downloads_done >= tracks_seen
+                and encodes_done >= encodes_submitted
+            )
+
+        try:
+            while True:
+                if self.cancel_event.is_set():
                     cancelled = True
-                except Exception as exc:  # defensive: _encode_track handles errors
-                    track.stage = Stage.FAILED
-                    track.error = str(exc)
-                    self.log.error(f"Unexpected encode failure on {track.title}: {exc}")
+                    break
+                try:
+                    kind, track, payload = events.get(timeout=0.2)
+                except queue.Empty:
+                    if finished():
+                        break
+                    continue
+
+                if kind == "track":
+                    assert track is not None
+                    tracks_seen += 1
+                    playlist.tracks.append(track)
+                elif kind == "downloaded":
+                    downloads_done += 1
+                    assert track is not None
+                    raw = payload
+                    if raw is not None:
+                        encodes.submit(encode_one, track, raw)
+                        encodes_submitted += 1
+                elif kind == "encoded":
+                    encodes_done += 1
+                elif kind == "metadata_error":
+                    metadata_error = payload
+                    metadata_done = True
+                elif kind == "metadata_done":
+                    metadata_done = True
+                elif kind in ("download_error", "encode_error"):
+                    # Defensive: the stage methods normally swallow their errors.
+                    if track is not None:
+                        track.stage = Stage.FAILED
+                        track.error = str(payload)
+                    self.log.error(
+                        f"Unexpected {kind} on "
+                        f"{getattr(track, 'title', '?')}: {payload}"
+                    )
+                    if kind == "download_error":
+                        downloads_done += 1
+                    else:
+                        encodes_done += 1
+
+                if finished():
+                    break
         except KeyboardInterrupt:
             self.cancel_event.set()
             cancelled = True
-            for future in download_futures:
-                future.cancel()
-            for future in encode_futures:
-                future.cancel()
             raise
         finally:
             downloads.shutdown(wait=True, cancel_futures=True)
             encodes.shutdown(wait=True, cancel_futures=True)
+            producer.join(timeout=2.0)
             if cancelled or self.cancel_event.is_set():
                 for track in playlist.tracks:
                     if not track.stage.terminal:
                         track.stage = Stage.CANCELLED
                 playlist.stage = Stage.CANCELLED
                 self.context.cancelled = True
+
+        if metadata_error is not None:
+            if not playlist.tracks:
+                playlist.stage = Stage.FAILED
+                playlist.error = str(metadata_error)
+                self.log.error(
+                    f"Playlist metadata failed for {playlist.title}: {metadata_error}"
+                )
+                self.ui.notify(f"Could not read playlist: {metadata_error}", "error")
+            else:
+                self.log.warning(
+                    f"Playlist metadata ended early for {playlist.title}: "
+                    f"{metadata_error}"
+                )
+                self.ui.notify(
+                    f"Playlist metadata ended early: {metadata_error}", "warning"
+                )
+        elif not playlist.tracks:
+            playlist.stage = Stage.FAILED
+            playlist.error = "The playlist contains no downloadable items"
+            self.log.error(f"Playlist '{playlist.title}' is empty")
+            self.ui.notify("The playlist contains no downloadable items", "error")
 
     # -- download stage -------------------------------------------------------
 

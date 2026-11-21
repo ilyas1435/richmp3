@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import importlib.util
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 from .config import Settings
 from .models import Playlist, Track
@@ -108,8 +109,16 @@ class Downloader:
 
     # -- metadata -------------------------------------------------------------
 
-    def resolve(self, url: str) -> Playlist:
-        """Resolve a URL into a playlist of tracks without downloading media."""
+    @contextmanager
+    def open_playlist(self, url: str) -> Iterator[tuple[str, str | None, Iterator[dict], int | None]]:
+        """Open a URL and yield playlist metadata without consuming entries.
+
+        With ``extract_flat: in_playlist`` yt-dlp returns a lazy entry list, so
+        the caller can start workers on the first track while the rest of the
+        playlist metadata is still being produced.  The ``YoutubeDL`` instance
+        stays alive for the whole ``with`` block because the lazy entries depend
+        on it.
+        """
         import yt_dlp
 
         options = self._common_options()
@@ -122,55 +131,85 @@ class Downloader:
         )
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(url, download=False)
-        except Exception as exc:  # yt-dlp raises a wide variety of errors
+                try:
+                    info = ydl.extract_info(url, download=False)
+                except Exception as exc:  # yt-dlp raises a wide variety of errors
+                    raise DownloadError(_clean_error(exc)) from exc
+
+                if not info:
+                    raise DownloadError("No media information returned for this URL")
+
+                if info.get("_type") in ("playlist", "multi_video"):
+                    title = str(info.get("title") or info.get("id") or "Playlist")
+                    uploader = info.get("uploader") or info.get("channel")
+                    entries = info.get("entries")
+                    if entries is None:
+                        raise DownloadError("The playlist returned no entries")
+                    expected = info.get("n_entries") or info.get("playlist_count")
+                    try:
+                        expected_int = int(expected) if expected else None
+                    except (TypeError, ValueError):
+                        expected_int = None
+                    self.log.info(
+                        f"Streaming playlist '{title}'"
+                        + (f" (~{expected_int} tracks)" if expected_int else "")
+                    )
+                    yield title, uploader, iter(entries), expected_int
+                    return
+
+                title = str(info.get("title") or info.get("id") or "audio")
+                uploader = info.get("uploader") or info.get("channel")
+                self.log.info(f"Resolved single track '{title}'")
+                yield title, uploader, iter((info,)), 1
+        except (Cancelled, KeyboardInterrupt):
+            # Never convert a user interrupt into a download error: the
+            # contextmanager re-raises body exceptions at the yield point.
+            raise
+        except DownloadError:
+            raise
+        except Exception as exc:
             raise DownloadError(_clean_error(exc)) from exc
 
-        if not info:
-            raise DownloadError("No media information returned for this URL")
+    @staticmethod
+    def track_from_entry(entry: dict, index: int) -> Track | None:
+        """Build a :class:`Track` from a yt-dlp entry, or ``None`` if unusable."""
+        if not isinstance(entry, dict):
+            return None
+        track_url = (
+            entry.get("webpage_url")
+            or entry.get("original_url")
+            or entry.get("url")
+        )
+        if not track_url:
+            return None
+        return Track(
+            index=index,
+            url=track_url,
+            title=entry.get("title") or f"Track {index}",
+            duration=_as_float(entry.get("duration")),
+            uploader=entry.get("uploader") or entry.get("channel"),
+        )
 
-        if info.get("_type") in ("playlist", "multi_video"):
-            title = info.get("title") or info.get("id") or "Playlist"
-            entries = list(info.get("entries") or [])
+    def resolve(self, url: str) -> Playlist:
+        """Resolve a URL into a playlist of tracks without downloading media.
+
+        Kept for dry runs and tests; real runs use :meth:`open_playlist` so the
+        first track can start before the whole playlist is enumerated.
+        """
+        with self.open_playlist(url) as (title, uploader, entries, expected):
             tracks: list[Track] = []
             for entry in entries:
                 if not entry:
                     continue
-                track_url = (
-                    entry.get("webpage_url")
-                    or entry.get("original_url")
-                    or entry.get("url")
-                )
-                if not track_url:
+                track = self.track_from_entry(entry, len(tracks) + 1)
+                if track is None:
                     continue
-                tracks.append(
-                    Track(
-                        index=len(tracks) + 1,
-                        url=track_url,
-                        title=entry.get("title") or f"Track {len(tracks) + 1}",
-                        duration=_as_float(entry.get("duration")),
-                        uploader=entry.get("uploader") or entry.get("channel"),
-                    )
-                )
-            if not tracks:
-                raise DownloadError("The playlist contains no downloadable items")
-            self.log.info(f"Resolved playlist '{title}' with {len(tracks)} tracks")
-            return Playlist(
-                url=url,
-                title=str(title),
-                uploader=info.get("uploader") or info.get("channel"),
-                tracks=tracks,
-            )
+                tracks.append(track)
 
-        track = Track(
-            index=1,
-            url=info.get("webpage_url") or url,
-            title=info.get("title") or info.get("id") or "audio",
-            duration=_as_float(info.get("duration")),
-            uploader=info.get("uploader") or info.get("channel"),
-        )
-        self.log.info(f"Resolved single track '{track.title}'")
-        return Playlist(url=url, title=track.title, uploader=track.uploader, tracks=[track])
+        if not tracks:
+            raise DownloadError("The playlist contains no downloadable items")
+        self.log.info(f"Resolved playlist '{title}' with {len(tracks)} tracks")
+        return Playlist(url=url, title=title, uploader=uploader, tracks=tracks)
 
     # -- downloading ----------------------------------------------------------
 

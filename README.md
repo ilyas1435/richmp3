@@ -35,8 +35,9 @@ Overall █████████████░░░░░░░░░░░
   `--no-voice-filter`.
 - **Sequential, Unicode-safe names** — `0001 - العنوان.mp3` with NFC
   normalisation, bidi-control stripping and byte-safe UTF-8 truncation.
-- **Playlists and channels** — resolved once, downloaded item by item into one
-  folder per playlist, in order.
+- **Playlists and channels** — resolved once with `extract_flat: in_playlist` and
+  consumed lazily, so workers start on the first track without waiting for the
+  whole playlist to enumerate. Files land in one folder per playlist, in order.
 - **Parallel producer/consumer** — separate download and encoder pools: a track
   starts encoding the moment its download finishes while later tracks keep
   downloading. Fragmented HLS/DASH downloads fetch up to 8 fragments at once,
@@ -211,7 +212,7 @@ richmp3/
   organizer.py    Unicode-safe names, sequential prefixes, temp layout, cleanup
   archive.py      streaming ZIP writer with progress and atomic replace
   ui.py           Rich live dashboard, plain fallback, summary, dry-run table
-  pipeline.py     worker pools, retries, cleanup, ZIP orchestration
+  pipeline.py     lazy metadata -> download pool -> encode pool, ZIP
   utils.py        names, rates, formatting, process control, logging
 tests/            unit + real-FFmpeg integration tests
 ```

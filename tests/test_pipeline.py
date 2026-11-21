@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+import io
 import threading
 import unittest
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from rich.console import Console
-import io
 
 from richmp3.config import Settings, finalize
-from richmp3.downloader import DownloadError
+from richmp3.downloader import Downloader, DownloadError
 from richmp3.models import Playlist, Stage, Track
 from richmp3.organizer import make_layout
 from richmp3.pipeline import Pipeline
@@ -37,6 +38,25 @@ class FakeDownloader:
                 for i, title in enumerate(titles)
             ],
         )
+
+    @contextmanager
+    def open_playlist(self, url: str):
+        """Lazy stand-in: yield entries one by one like yt-dlp does."""
+        playlist = self.resolve(url)
+        entries = [
+            {
+                "webpage_url": track.url,
+                "title": track.title,
+                "duration": track.duration,
+                "uploader": track.uploader,
+            }
+            for track in playlist.tracks
+        ]
+        yield playlist.title, playlist.uploader, iter(entries), len(entries)
+
+    @staticmethod
+    def track_from_entry(entry, index):
+        return Downloader.track_from_entry(entry, index)
 
     def download(self, track, temp_dir, on_progress=None, cancel_event=None):
         with self.lock:
@@ -210,6 +230,52 @@ class PipelineTests(unittest.TestCase):
             worker.join(15)
         self.assertFalse(worker.is_alive())
 
+    def test_first_track_downloads_before_metadata_completes(self) -> None:
+        """Lazy metadata proof: track 1 downloads while entry 2 is still blocked."""
+        second_yielded = threading.Event()
+        release_metadata = threading.Event()
+        first_downloaded = threading.Event()
+
+        class LazyDownloader(FakeDownloader):
+            @contextmanager
+            def open_playlist(self, url):
+                def entries():
+                    yield {"webpage_url": "fake://1", "title": "First", "duration": 1.0}
+                    second_yielded.set()
+                    release_metadata.wait(10)
+                    yield {"webpage_url": "fake://2", "title": "Second", "duration": 1.0}
+
+                yield "Lazy playlist", None, entries(), 2
+
+            def download(self, track, temp_dir, on_progress=None, cancel_event=None):
+                result = super().download(track, temp_dir, on_progress, cancel_event)
+                if track.index == 1:
+                    first_downloaded.set()
+                return result
+
+        self.pipeline.settings = self.settings.with_overrides(
+            download_workers=1, convert_workers=1
+        )
+        self.pipeline.downloader = LazyDownloader()
+        self.pipeline._converter = FakeConverter()
+
+        worker = threading.Thread(target=self.pipeline.run, args=(["fake://lazy"],))
+        worker.start()
+        try:
+            self.assertTrue(
+                second_yielded.wait(10),
+                "metadata was fully consumed before the first download",
+            )
+            self.assertTrue(
+                first_downloaded.wait(10),
+                "first track did not download while metadata was blocked",
+            )
+        finally:
+            release_metadata.set()
+            worker.join(15)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(self.context.playlists[0].completed, 2)
+
     def test_cancel_stops_cleanly(self) -> None:
         downloader = self._install(FakeDownloader())
         downloader.cancel_on = 1
@@ -224,8 +290,10 @@ class PipelineTests(unittest.TestCase):
 
     def test_resolve_failure_is_reported(self) -> None:
         class Broken(FakeDownloader):
-            def resolve(self, url: str) -> Playlist:
+            @contextmanager
+            def open_playlist(self, url: str):
                 raise DownloadError("video unavailable")
+                yield
 
         self._install(Broken())
         self.pipeline.run(["fake://missing"])
