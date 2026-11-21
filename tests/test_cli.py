@@ -33,6 +33,10 @@ class CliSettingsTests(unittest.TestCase):
         self.assertTrue(args.wizard)
         self.assertEqual(args.urls, [])
 
+    def test_settings_and_update_commands_need_no_url(self) -> None:
+        self.assertTrue(self.parse(["--settings"]).settings)
+        self.assertTrue(self.parse(["--update"]).update)
+
     def test_flags_override(self) -> None:
         settings, _ = finalize(
             _build_settings(

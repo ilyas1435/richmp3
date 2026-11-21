@@ -61,7 +61,7 @@ Overall █████████████░░░░░░░░░░░
 Termux:
 
 ```bash
-pkg install python ffmpeg
+pkg install python ffmpeg git
 python -m pip install rich yt-dlp
 ```
 
@@ -79,6 +79,12 @@ python -m richmp3 --version
 ```bash
 # Friendly menu for speech quality and phone-safe download settings
 python -m richmp3 --wizard
+
+# Change and save defaults without downloading
+python -m richmp3 --settings
+
+# Check GitHub and fast-forward this clean checkout
+python -m richmp3 --update
 
 # Default: MP3, ABR 24 kbps, 11025 Hz, mono, ZIP enabled
 richmp3 "https://www.youtube.com/playlist?list=..."
@@ -109,6 +115,22 @@ encoder. The smaller 16 kbps profile saves more space but reduces speech
 clarity. MP3 is chosen instead of Opus for broader compatibility with older
 players. Wizard choices apply to that run; normal configuration-file and CLI
 options remain available.
+
+The saved settings menu stores choices in the active `richmp3.toml` or the
+user config at `~/.config/richmp3/config.toml`. Run it again with
+`python -m richmp3 --settings`; command-line options still override saved
+values.
+
+`python -m richmp3 --update` checks the configured GitHub upstream and pulls
+only when the checkout is clean and can be fast-forwarded. It never stashes,
+resets, or merges conflicting work. If dependencies change, it tells you to
+run `python -m pip install -e .`. Restart RichMP3 after an update.
+The updater requires running from a Git checkout with an upstream branch
+configured; a wheel-only installation cannot update its source files.
+
+From the interactive console, use `:settings` (or `:s`) to change saved
+defaults, `:update` to check and pull, and `:menu` to start a download using
+one-time settings.
 
 Track-row percentages show progress within that track's current phase.
 Overall run progress also accounts for later conversion and cleanup work, so

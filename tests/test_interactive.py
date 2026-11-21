@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import tomllib
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from richmp3.interactive import configure_interactively
+from richmp3.interactive import configure_interactively, save_settings_interactively
 
 
 class InteractiveWizardTests(unittest.TestCase):
@@ -59,6 +62,31 @@ class InteractiveWizardTests(unittest.TestCase):
         )
         self.assertIsNone(result)
         self.assertTrue(any("علامات الاقتباس" in line for line in output))
+
+    def test_settings_shortcut_saves_defaults_and_preserves_other_values(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "richmp3.toml"
+            path.write_text(
+                "# keep this comment\nretries = 5\ncustom_option = \"keep\"\n"
+                "\n[custom]\nbitrate = 7\n",
+                encoding="utf-8",
+            )
+            remaining = iter(["1", "3", "", "", ""])
+            output: list[str] = []
+            saved = save_settings_interactively(
+                input_fn=lambda _prompt: next(remaining),
+                output_fn=output.append,
+                config_path=path,
+            )
+            self.assertEqual(saved, path)
+            self.assertIn("# keep this comment", path.read_text(encoding="utf-8"))
+            config = tomllib.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(config["bitrate"], 16)
+            self.assertEqual(config["sample_rate"], 11025)
+            self.assertEqual(config["download_workers"], 3)
+            self.assertEqual(config["retries"], 5)
+            self.assertEqual(config["custom_option"], "keep")
+            self.assertEqual(config["custom"]["bitrate"], 7)
 
 
 if __name__ == "__main__":

@@ -171,10 +171,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--config", default=None,
         help="TOML config file (default: ./richmp3.toml or ~/.config/richmp3/config.toml)",
     )
-    parser.add_argument(
+    interaction_group = parser.add_mutually_exclusive_group()
+    interaction_group.add_argument(
         "--wizard",
         action="store_true",
         help="choose speech compression and phone download settings interactively",
+    )
+    interaction_group.add_argument(
+        "--settings",
+        action="store_true",
+        help="change and save default settings without starting a download",
+    )
+    interaction_group.add_argument(
+        "--update",
+        action="store_true",
+        help="check GitHub and fast-forward this clean checkout",
     )
     parser.add_argument("--version", action="version", version=f"richmp3 {__version__}")
     return parser
@@ -184,6 +195,25 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     console = Console(highlight=False)
+
+    if args.update:
+        from .updater import update_from_github
+
+        result = update_from_github()
+        console.print(result.message)
+        return 0 if result.ok else 1
+
+    if args.settings:
+        from .interactive import save_settings_interactively
+
+        try:
+            save_settings_interactively(
+                config_path=Path(args.config) if args.config else None,
+            )
+        except (OSError, ValueError) as exc:
+            console.print(f"تعذر حفظ الإعدادات: {exc}")
+            return 1
+        return 0
 
     wizard_settings: dict[str, object] = {}
     if args.wizard:

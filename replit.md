@@ -20,7 +20,9 @@ Keep its existing structure and stack.
   ```
 
 The wizard offers speech-focused MP3 quality profiles and phone-friendly
-download settings. In the Run console, enter `:menu` to open it.
+download settings. In the Run console, enter `:menu` for a one-time setup,
+`:settings` to change and save defaults, or `:update` to fast-forward from the
+configured GitHub upstream when the checkout is clean.
 
 The URLs above are placeholders; replace them with media you have permission
 to download. If console input is unavailable, use the Shell commands instead.

@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import os
+import re
 import shlex
+import tempfile
 from pathlib import Path
+import tomllib
 from typing import Callable
+
+from .config import config_path_default
 
 Input = Callable[[str], str]
 Output = Callable[[str], object]
@@ -18,6 +25,55 @@ def configure_interactively(
 
     Return ``None`` when the user cancels at the confirmation step.
     """
+    settings = collect_settings(input_fn, output_fn)
+    if settings is None:
+        return None
+
+    urls_text = input_fn(
+        "\nالصق رابطًا واحدًا أو عدة روابط (افصل بينها بمسافات): "
+    ).strip()
+    try:
+        urls = shlex.split(urls_text)
+    except ValueError:
+        output_fn("تعذر قراءة الروابط؛ راجع علامات الاقتباس.")
+        return None
+    if not urls:
+        output_fn("لم يتم إدخال أي رابط.")
+        return None
+
+    _print_summary(settings, output_fn)
+    if not _yes_no(input_fn, "بدء التنزيل بهذه الإعدادات؟ [نعم]: ", default=True):
+        output_fn("أُلغي التشغيل دون تغيير أي ملفات.")
+        return None
+    return urls, settings
+
+
+def save_settings_interactively(
+    input_fn: Input = input,
+    output_fn: Output = print,
+    config_path: Path | None = None,
+) -> Path | None:
+    """Collect settings and save them as future defaults without downloading."""
+    settings = collect_settings(input_fn, output_fn)
+    if settings is None:
+        return None
+    _print_summary(settings, output_fn)
+    path = config_path or config_path_default()
+    if path is None:
+        path = Path.home() / ".config" / "richmp3" / "config.toml"
+    if not _yes_no(input_fn, f"حفظ الإعدادات في {path}؟ [نعم]: ", default=True):
+        output_fn("لم يتم تغيير الإعدادات.")
+        return None
+    write_settings(path, settings)
+    output_fn(f"تم حفظ الإعدادات. غيّرها لاحقًا بالأمر: python -m richmp3 --settings")
+    return path
+
+
+def collect_settings(
+    input_fn: Input = input,
+    output_fn: Output = print,
+) -> dict[str, object] | None:
+    """Prompt for speech quality, phone workload, output, and archive settings."""
     output_fn("\nإعداد سريع للصوتيات والمحاضرات")
     output_fn("كل الخيارات تحفظ MP3 أحادي القناة لتوافق أفضل مع مشغلات MP3.")
     output_fn("\nجودة الصوت وحجم الملف:")
@@ -65,20 +121,8 @@ def configure_interactively(
         "إنشاء ZIP؟ اختر لا لتشغيل ملفات MP3 مباشرة [لا]: ",
         default=False,
     )
-    urls_text = input_fn(
-        "\nالصق رابطًا واحدًا أو عدة روابط (افصل بينها بمسافات): "
-    ).strip()
-    try:
-        urls = shlex.split(urls_text)
-    except ValueError:
-        output_fn("تعذر قراءة الروابط؛ راجع علامات الاقتباس.")
-        return None
-    if not urls:
-        output_fn("لم يتم إدخال أي رابط.")
-        return None
-
     bitrate, sample_rate = bitrate_rate
-    settings: dict[str, object] = {
+    return {
         "format": "mp3",
         "mode": "cbr",
         "bitrate": bitrate,
@@ -90,15 +134,73 @@ def configure_interactively(
         "output": output_path,
         "zip": zip_output,
     }
+
+
+def _print_summary(settings: dict[str, object], output_fn: Output) -> None:
     output_fn(
-        f"\nالمقترح: MP3 أحادي، CBR {bitrate} kbps، {sample_rate} Hz، "
-        f"{download_workers} تنزيل، {convert_workers} تحويل، "
-        f"ZIP {'نعم' if zip_output else 'لا'}."
+        f"\nالمقترح: MP3 أحادي، CBR {settings['bitrate']} kbps، "
+        f"{settings['sample_rate']} Hz، {settings['download_workers']} تنزيل، "
+        f"{settings['convert_workers']} تحويل، "
+        f"ZIP {'نعم' if settings['zip'] else 'لا'}."
     )
-    if not _yes_no(input_fn, "بدء التنزيل بهذه الإعدادات؟ [نعم]: ", default=True):
-        output_fn("أُلغي التشغيل دون تغيير أي ملفات.")
-        return None
-    return urls, settings
+
+
+def write_settings(path: Path, settings: dict[str, object]) -> None:
+    """Atomically update top-level TOML keys while retaining unrelated content."""
+    path = Path(path).expanduser()
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    if existing:
+        tomllib.loads(existing)  # refuse to overwrite an already-invalid file
+
+    replacements = {key: f"{key} = {_toml_value(value)}" for key, value in settings.items()}
+    seen: set[str] = set()
+    output_lines: list[str] = []
+    in_table = False
+    first_table_line: int | None = None
+    for line in existing.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_table = True
+            if first_table_line is None:
+                first_table_line = len(output_lines)
+        match = None if in_table else re.match(r"^\s*([A-Za-z0-9_-]+)\s*=", line)
+        key = match.group(1) if match else None
+        if key in replacements:
+            output_lines.append(replacements[key])
+            seen.add(key)
+        else:
+            output_lines.append(line)
+    missing = [replacements[key] for key in replacements if key not in seen]
+    if first_table_line is None:
+        output_lines.extend(missing)
+    elif missing:
+        output_lines[first_table_line:first_table_line] = missing + [""]
+    content = "\n".join(output_lines) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _toml_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    raise TypeError(f"Unsupported TOML setting value: {type(value).__name__}")
 
 
 def _choice(
