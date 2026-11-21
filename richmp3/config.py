@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -19,13 +19,14 @@ MP3_SAMPLE_RATES = (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000
 OPUS_SAMPLE_RATES = (8000, 12000, 16000, 24000, 48000)
 
 AUDIO_FORMATS = ("mp3", "opus")
-MODES = ("abr", "cbr")
+MODES = ("vbr", "abr", "cbr")
 ZIP_METHODS = ("stored", "deflate")
 
 CONFIG_KEYS = frozenset(
     {
         "output",
         "bitrate",
+        "vbr_quality",
         "sample_rate",
         "format",
         "mode",
@@ -52,29 +53,44 @@ CONFIG_KEYS = frozenset(
 )
 
 
+def is_termux() -> bool:
+    return (
+        os.environ.get("PREFIX", "").startswith("/data/data/com.termux/")
+        or bool(os.environ.get("TERMUX_VERSION"))
+    )
+
+
+def default_output_directory() -> Path:
+    """Use Android shared Downloads in Termux; use a local folder elsewhere."""
+    if is_termux():
+        return Path.home() / "storage" / "shared" / "Download"
+    return Path("downloads")
+
+
 def default_convert_workers() -> int:
     cpus = os.cpu_count() or 2
-    return max(1, min(4, cpus // 2))
+    return max(1, min(8, cpus))
 
 
 def default_download_workers() -> int:
-    return 4
+    return 8
 
 
 @dataclass(frozen=True)
 class Settings:
     """Immutable, fully validated run configuration."""
 
-    output: Path = Path("downloads")
+    output: Path = field(default_factory=default_output_directory)
     bitrate: int = 24
+    vbr_quality: int = 7
     sample_rate: int = 11025
     audio_format: str = "mp3"
-    mode: str = "abr"
+    mode: str = "vbr"
     voice_filter: bool = True
     audio_language: str = "original"
 
-    download_workers: int = 4
-    convert_workers: int = default_convert_workers()
+    download_workers: int = field(default_factory=default_download_workers)
+    convert_workers: int = field(default_factory=default_convert_workers)
     playlist: bool = True
     zip_output: bool = True
     zip_method: str = "stored"
@@ -92,7 +108,7 @@ class Settings:
     log_file: Path | None = None
     dry_run: bool = False
     timeout: float = 30.0
-    concurrent_fragments: int = 8
+    concurrent_fragments: int = 16
 
     @property
     def extension(self) -> str:
@@ -100,10 +116,19 @@ class Settings:
 
     @property
     def mode_label(self) -> str:
-        """Opus is always VBR; MP3 uses the configured ABR/CBR mode."""
+        """Return the effective MP3 or Opus encoding mode."""
         if self.audio_format == "opus":
             return "VBR"
         return self.mode.upper()
+
+    @property
+    def encoding_label(self) -> str:
+        """Describe the active quality/bitrate setting without ambiguity."""
+        if self.audio_format == "opus":
+            return f"VBR {self.bitrate} kbps"
+        if self.mode == "vbr":
+            return f"VBR Q{self.vbr_quality}"
+        return f"{self.mode.upper()} {self.bitrate} kbps"
 
     @property
     def sample_rates(self) -> tuple[int, ...]:
@@ -150,7 +175,7 @@ def finalize(settings: Settings) -> tuple[Settings, list[str]]:
             f"{settings.audio_format.upper()}; using {sample_rate} Hz"
         )
 
-    if settings.audio_format == "mp3":
+    if settings.audio_format == "mp3" and settings.mode != "vbr":
         legal_max = max_mp3_bitrate(sample_rate)
         if bitrate > legal_max:
             notices.append(
@@ -158,8 +183,12 @@ def finalize(settings: Settings) -> tuple[Settings, list[str]]:
                 f"{sample_rate} Hz; using {legal_max} kbps"
             )
             bitrate = legal_max
-    elif settings.mode != "abr":
+    elif settings.audio_format == "opus" and settings.mode != "vbr":
         notices.append("Opus is always VBR; the MP3 mode setting is ignored")
+
+    vbr_quality = max(0, min(9, settings.vbr_quality))
+    if vbr_quality != settings.vbr_quality:
+        notices.append(f"VBR quality {settings.vbr_quality} clamped to {vbr_quality}")
 
     workers = max(1, min(16, settings.download_workers))
     if workers != settings.download_workers:
@@ -179,10 +208,19 @@ def finalize(settings: Settings) -> tuple[Settings, list[str]]:
 
     fragments = max(1, min(16, settings.concurrent_fragments))
     timeout = max(5.0, min(300.0, settings.timeout))
+    output = Path(settings.output).expanduser()
+    if is_termux() and output == default_output_directory():
+        shared_storage = Path.home() / "storage" / "shared"
+        if not shared_storage.is_dir() or not os.access(shared_storage, os.W_OK):
+            raise ValueError(
+                "Android shared storage is not available. "
+                "Run 'termux-setup-storage', grant access, and try again."
+            )
 
     normalized = replace(
         settings,
-        output=Path(settings.output).expanduser(),
+        output=output,
+        vbr_quality=vbr_quality,
         audio_language=audio_language,
         bitrate=bitrate,
         sample_rate=sample_rate,

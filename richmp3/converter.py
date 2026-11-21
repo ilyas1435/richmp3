@@ -71,11 +71,13 @@ class Converter:
             cmd += [
                 "-c:a",
                 "libmp3lame",
-                "-b:a",
-                f"{s.bitrate}k",
                 "-compression_level",
-                "5",
+                "9",
             ]
+            if s.mode == "vbr":
+                cmd += ["-q:a", str(s.vbr_quality)]
+            else:
+                cmd += ["-b:a", f"{s.bitrate}k"]
             if s.mode == "abr":
                 cmd += ["-abr", "1"]
             cmd += ["-id3v2_version", "3", "-write_id3v1", "0"]
@@ -89,7 +91,7 @@ class Converter:
                 "-vbr",
                 "on",
                 "-compression_level",
-                "10",
+                "5",
                 "-application",
                 "audio",
             ]

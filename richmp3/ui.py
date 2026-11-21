@@ -198,8 +198,7 @@ class Dashboard(BaseUI):
         # Configuration strip ----------------------------------------------
         config = Text(no_wrap=True, overflow="ellipsis")
         config.append(settings.audio_format.upper(), style="bold bright_yellow")
-        config.append(f" {settings.mode_label} ", style="bright_magenta")
-        config.append(f"{settings.bitrate}k", style="bright_white")
+        config.append(f" {settings.encoding_label}", style="bright_magenta")
         config.append(" · ", style="grey42")
         config.append(f"{settings.sample_rate} Hz", style="bright_white")
         config.append(" · mono", style="grey62")
@@ -546,8 +545,8 @@ def print_dry_run(console: Console, settings: Settings, context: UIContext) -> N
     console.print(table)
     console.print(
         Text(
-            f"{settings.audio_format.upper()} · {settings.mode_label} "
-            f"{settings.bitrate} kbps · {settings.sample_rate} Hz · mono · "
+            f"{settings.audio_format.upper()} · {settings.encoding_label} "
+            f"· {settings.sample_rate} Hz · mono · "
             f"zip {settings.zip_method if settings.zip_output else 'off'}"
             f" · folder {'kept' if settings.keep_folder else 'removed after zip'}",
             style="grey58",

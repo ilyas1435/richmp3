@@ -10,7 +10,12 @@ import tomllib
 
 from richmp3 import __version__
 from richmp3.cli import _build_settings, _normalize_command, build_parser, main
-from richmp3.config import config_path_default, finalize, load_config
+from richmp3.config import (
+    config_path_default,
+    default_convert_workers,
+    finalize,
+    load_config,
+)
 from richmp3.downloader import (
     DownloadError,
     _audio_format_selector,
@@ -41,16 +46,29 @@ class CliSettingsTests(unittest.TestCase):
         self.assertEqual(settings.audio_format, "mp3")
         self.assertEqual(settings.bitrate, 24)
         self.assertEqual(settings.sample_rate, 11025)
-        self.assertEqual(settings.download_workers, 4)
+        self.assertEqual(settings.download_workers, 8)
+        self.assertEqual(settings.convert_workers, default_convert_workers())
+        self.assertEqual(settings.output, Path("downloads"))
         self.assertTrue(settings.playlist)
         self.assertTrue(settings.zip_output)
-        self.assertEqual(settings.mode_label, "ABR")
+        self.assertEqual(settings.mode_label, "VBR")
+        self.assertEqual(settings.encoding_label, "VBR Q7")
         self.assertTrue(settings.voice_filter)
         self.assertEqual(settings.audio_language, "original")
         self.assertEqual(settings.js_runtime, "auto")
         self.assertFalse(settings.keep_folder)
-        self.assertEqual(settings.concurrent_fragments, 8)
+        self.assertEqual(settings.concurrent_fragments, 16)
         self.assertFalse(notices)
+
+    def test_vbr_quality_cli_override(self) -> None:
+        settings, _ = finalize(
+            _build_settings(
+                self.parse(["--mode", "vbr", "--vbr-quality", "5", "URL"]), {}
+            )
+        )
+        self.assertEqual(settings.mode, "vbr")
+        self.assertEqual(settings.vbr_quality, 5)
+        self.assertEqual(settings.encoding_label, "VBR Q5")
 
     def test_wizard_flag_does_not_require_url(self) -> None:
         args = self.parse(["--wizard"])
@@ -114,7 +132,7 @@ class CliSettingsTests(unittest.TestCase):
         with Path("pyproject.toml").open("rb") as config_file:
             config = tomllib.load(config_file)
         self.assertEqual(__version__, config["project"]["version"])
-        self.assertEqual(__version__, "1.5.0")
+        self.assertEqual(__version__, "1.6.0")
 
     def test_flags_override(self) -> None:
         settings, _ = finalize(

@@ -10,7 +10,7 @@ while a live Rich dashboard shows per-track and overall progress.
 
 ```
 RichMP3   قائمة القرآن الكريم   12 tracks · 7 done
-MP3 · ABR 24 kbps · 11025 Hz · mono · 4↓ 4⚙
+MP3 · VBR Q7 · 11025 Hz · mono · 8↓ 8⚙
 
 Overall █████████████░░░░░░░░░░░   58.2%   7/12
  001  Title A    Downloading   ████░░░░░░░░   41%  1.2 MB/3.0 MB 180 KB/s
@@ -29,7 +29,7 @@ Overall █████████████░░░░░░░░░░░
   original, RichMP3 stops and explains how to choose instead of silently
   downloading a dub.
 - **Configurable encoding** — 8–128 kbps, 8000–44100 Hz, always mono.
-  Default: MP3, ABR 24 kbps, 11025 Hz, LAME `-compression_level 5`.
+  Default: MP3 VBR Q7, 11025 Hz; ABR and CBR are also available.
 - **Voice-clarity filter** — at ≤16 kHz, `highpass=f=100,lowpass=f=5000` strips
   rumble and hiss for clearer speech and slightly smaller files. Disable with
   `--no-voice-filter`.
@@ -40,7 +40,7 @@ Overall █████████████░░░░░░░░░░░
   whole playlist to enumerate. Files land in one folder per playlist, in order.
 - **Parallel producer/consumer** — separate download and encoder pools: a track
   starts encoding the moment its download finishes while later tracks keep
-  downloading. Fragmented HLS/DASH downloads fetch up to 8 fragments at once,
+  downloading. Fragmented HLS/DASH downloads fetch up to 16 fragments at once,
   and each encoder is pinned to one thread.
 - **Self-cleaning** — every raw download is deleted right after a successful
   conversion; only final files and the ZIP remain. When zipping succeeds the
@@ -75,6 +75,8 @@ The installer creates a virtual environment, installs Python and FFmpeg
 dependencies, and adds `richmp3` to Termux's command path. After installation,
 run `richmp3` to open the menu. This initial clone command is for first-time
 installation; use `richmp3 update` for later updates.
+Run `termux-setup-storage` once and grant access so RichMP3 can save to the
+shared Android `Download` folder.
 
 ### Install from a local checkout
 
@@ -104,27 +106,27 @@ richmp3 update
 richmp3 version
 richmp3 help
 
-# Default: MP3, ABR 24 kbps, 11025 Hz, mono, ZIP enabled
+# Default: MP3 VBR Q7, 11025 Hz, mono, ZIP enabled
 richmp3 "https://www.youtube.com/playlist?list=..."
 
 # Several URLs in one run
 richmp3 URL1 URL2
 
-# List audio languages and choose one
-richmp3 languages URL
-richmp3 download --choose-audio URL
-richmp3 download --audio-language ar URL
-
 # Higher quality, no archive
-richmp3 -b 64 -r 22050 --no-zip URL
+richmp3 --mode abr -b 64 -r 22050 --no-zip URL
+
+# Choose another MP3 mode
+richmp3 --mode abr -b 24 URL
+richmp3 --mode cbr -b 32 URL
+richmp3 --mode vbr --vbr-quality 7 URL
 
 # Better quality per byte at low bitrates (Opus, 8-128 kbps)
 richmp3 -f opus -b 24 URL
 
-# List available audio tracks, then choose a language
+# List audio languages and choose one
 richmp3 languages URL
-richmp3 download --audio-language ar URL
 richmp3 download --choose-audio URL
+richmp3 download --audio-language ar URL
 
 # Preview planned filenames; touches nothing and needs no FFmpeg
 richmp3 --dry-run URL
@@ -136,11 +138,16 @@ richmp3 --limit-rate 300k --workers 2 URL
 richmp3 --cookies ~/cookies.txt URL
 ```
 
-The wizard offers MP3 speech presets, phone workload presets, an output
-directory, audio language, and an optional ZIP. Its recommended lecture profile is mono MP3
-CBR at 24 kbps and 11025 Hz, with a conservative two download workers and one
-encoder. The smaller 16 kbps profile saves more space but reduces speech
-clarity. MP3 is chosen instead of Opus for broader compatibility with older
+On Termux, the default output is `~/storage/shared/Download`; run
+`termux-setup-storage` and grant access once. On other systems it defaults to
+`./downloads`.
+
+The wizard offers MP3 VBR, ABR and CBR modes, speech-quality presets, phone
+workload presets, an output directory, audio language, and an optional ZIP.
+Its default lecture profile is VBR Q7 at 11025 Hz. The maximum-speed preset
+uses up to 8 download workers, 8 encoders, and 16 media fragments; it can use
+more battery and warm the phone. Choose balanced or battery saver to reduce
+load. MP3 is chosen instead of Opus for broad compatibility with older
 players. Wizard choices apply to that run; normal configuration-file and CLI
 options remain available.
 
@@ -170,23 +177,25 @@ Exit codes: `0` success, `1` one or more failures, `2` setup error
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| bitrate | `24` kbps | clamped to 8–128; MP3 ceiling also depends on sample rate |
+| MP3 mode | VBR | `vbr` (default), `abr`, or `cbr` |
+| VBR quality | `7` | LAME scale 0–9; lower is clearer and creates larger files |
+| bitrate | `24` kbps | used for ABR/CBR and Opus; ignored for MP3 VBR |
 | sample rate | `11025` Hz | `11000` is not a legal MP3 rate, so input snaps to the closest legal rate; Opus defaults to 12000 Hz |
 | channels | mono | always `-ac 1` |
-| mode | ABR | LAME `-abr 1` (variable bitrate around the target) |
-| MP3 quality | `compression_level 5` | balanced LAME speed/size |
+| MP3 encoder speed | fastest | LAME `-compression_level 9` |
 | voice filter | on at ≤16 kHz | `highpass=100, lowpass=5000`; off with `--no-voice-filter` |
 | container | MP3 | `--format opus` produces Ogg/Opus |
-| download workers | `4` | parallel tracks |
-| encode workers | CPU/2, max 4 | caps simultaneous FFmpeg processes (`-threads 1` each) |
-| concurrent fragments | `8` | parallel HLS/DASH fragment fetches |
+| download workers | `8` | parallel tracks; lower with `--workers` if needed |
+| encode workers | CPU cores, max 8 | parallel FFmpeg processes (`-threads 1` each) |
+| concurrent fragments | `16` | parallel HLS/DASH fragment fetches |
 | audio language | `original` | prefers original; use `richmp3 languages URL` to list alternatives |
 | ZIP | on | `stored` by default (audio does not compress) |
 | source folder | removed after ZIP | `--keep-folder` keeps it |
 
-**Why ABR instead of `-q:a`?** LAME's VBR quality scale (`-q:a 0–9`) does not map
-to a kbps target, so "24 kbps VBR" is best expressed as ABR at 24 kbps. Use
-`--mode cbr` for constant bitrate.
+VBR is the default and uses LAME's `-q:a` quality scale. Use `--mode abr` to
+target an average bitrate, or `--mode cbr` for a fixed bitrate. For VBR, set
+`--vbr-quality 0-9`; lower values improve clarity and increase file size.
+ABR and CBR use `--bitrate`.
 
 **Why 11025 Hz?** MP3 only supports the MPEG-2.5/2/1 rates
 (8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000). RichMP3 snaps
@@ -233,15 +242,16 @@ RichMP3 reads `./richmp3.toml` or `~/.config/richmp3/config.toml` if present.
 Command-line flags override the file. Use `--config PATH` for an explicit file.
 
 ```toml
-output = "~/Music/richmp3"
+output = "~/storage/shared/Download" # Termux; use "downloads" elsewhere
 bitrate = 24
+vbr_quality = 7
 sample_rate = 11025
 format = "mp3"        # mp3 | opus
 audio_language = "original" # original, or a code such as en or ar
-mode = "abr"          # abr | cbr
-voice_filter = true   # strip rumble/hiss at <=16 kHz (clearer voice, smaller files)
-download_workers = 4
-convert_workers = 4
+mode = "vbr"          # vbr | abr | cbr
+voice_filter = true   # strip rumble/hiss at <=16 kHz
+download_workers = 8
+convert_workers = 8
 playlist = true
 zip = true
 zip_method = "stored" # stored | deflate
@@ -254,7 +264,7 @@ limit_rate = "500k"
 js_runtime = "auto"   # auto | deno | node | bun | quickjs
 remote_components = false  # allow yt-dlp's EJS solver for better YouTube formats
 timeout = 30
-concurrent_fragments = 8
+concurrent_fragments = 16
 log_file = "~/richmp3.log"
 no_ui = false
 ```
@@ -291,13 +301,14 @@ cancellation and every UI render width.
 
 ## Performance notes on Android/Termux
 
-- Shared storage (`/storage/emulated/0`) is FUSE-backed. Parallel writes are
-  much slower there than on internal storage; `-w 4` is a sensible ceiling and
-  `convert_workers = 2` avoids thermal throttling.
+- Shared storage (`/storage/emulated/0`) is FUSE-backed. The maximum-speed
+  preset uses 8 track downloads and up to 8 encoders; choose balanced or
+  battery saver if the phone warms up or storage becomes a bottleneck.
 - Downloads and encodes run in separate pools. A slow encode never idles a
   download worker, so playlists stay network-saturated until the last file.
-- Downloads are network-bound and fragmented media (`concurrent_fragments = 8`)
-  benefits the most from parallelism.
+- Downloads are network-bound and fragmented media (`concurrent_fragments = 16`)
+  benefits from parallelism; reduce it with `--fragments` if the connection is
+  unstable.
 - `--no-zip` saves a full read/write pass of the playlist on slow storage.
 - `--no-voice-filter` keeps full-band audio if you are archiving music rather
   than speech.

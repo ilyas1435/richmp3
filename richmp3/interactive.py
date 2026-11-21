@@ -11,7 +11,11 @@ import tomllib
 from pathlib import Path
 from typing import Callable
 
-from .config import config_path_default
+from .config import (
+    config_path_default,
+    default_convert_workers,
+    default_output_directory,
+)
 
 Input = Callable[[str], str]
 Output = Callable[[str], object]
@@ -76,38 +80,67 @@ def collect_settings(
     """Prompt for speech quality, phone workload, output, and archive settings."""
     output_fn("\nQuick audio setup")
     output_fn("All presets create mono MP3 for broad MP3-player compatibility.")
-    output_fn("\nAudio quality and file size:")
-    output_fn("  1) Smallest — 16 kbps, 11025 Hz (less clear speech)")
-    output_fn("  2) Balanced for lectures — 24 kbps, 11025 Hz (recommended)")
-    output_fn("  3) Clearer speech — 32 kbps, 16000 Hz")
-    output_fn("  4) Custom")
-    quality = _choice(input_fn, "Choose quality [2]: ", {"1", "2", "3", "4"}, "2")
-    profiles = {
-        "1": (16, 11025),
-        "2": (24, 11025),
-        "3": (32, 16000),
-    }
-    if quality == "4":
-        bitrate = _number(input_fn, "Target bitrate in kbps [24]: ", 24, 8, 64)
-        sample_rate = _choice(
-            input_fn,
-            "Sample rate in Hz (8000/11025/12000/16000/22050) [11025]: ",
-            {"8000", "11025", "12000", "16000", "22050"},
-            "11025",
+    output_fn("\nMP3 encoding mode:")
+    output_fn("  1) VBR — quality-based, compact (recommended)")
+    output_fn("  2) ABR — target average bitrate")
+    output_fn("  3) CBR — fixed bitrate")
+    mode_choice = _choice(input_fn, "Choose mode [1]: ", {"1", "2", "3"}, "1")
+    mode = {"1": "vbr", "2": "abr", "3": "cbr"}[mode_choice]
+
+    if mode == "vbr":
+        output_fn("\nVBR quality (lower number means clearer audio and larger files):")
+        output_fn("  1) Smallest speech files — Q8")
+        output_fn("  2) Balanced lectures — Q7 (recommended)")
+        output_fn("  3) Clearer speech — Q5")
+        output_fn("  4) Custom")
+        quality = _choice(input_fn, "Choose VBR quality [2]: ", {"1", "2", "3", "4"}, "2")
+        vbr_presets = {"1": 8, "2": 7, "3": 5}
+        vbr_quality = (
+            _number(input_fn, "VBR quality [7] (0-9): ", 7, 0, 9)
+            if quality == "4"
+            else vbr_presets[quality]
         )
-        bitrate_rate = (bitrate, int(sample_rate))
+        bitrate = 24
+        sample_rate = {"1": 11025, "2": 11025, "3": 16000}.get(quality, 11025)
+        if quality == "4":
+            sample_rate = int(_choice(
+                input_fn,
+                "Sample rate in Hz (8000/11025/12000/16000/22050) [11025]: ",
+                {"8000", "11025", "12000", "16000", "22050"},
+                "11025",
+            ))
     else:
-        bitrate_rate = profiles[quality]
+        output_fn("\nAudio quality and file size:")
+        output_fn("  1) Smallest — 16 kbps, 11025 Hz (less clear speech)")
+        output_fn("  2) Balanced for lectures — 24 kbps, 11025 Hz (recommended)")
+        output_fn("  3) Clearer speech — 32 kbps, 16000 Hz")
+        output_fn("  4) Custom")
+        quality = _choice(input_fn, "Choose quality [2]: ", {"1", "2", "3", "4"}, "2")
+        profiles = {"1": (16, 11025), "2": (24, 11025), "3": (32, 16000)}
+        if quality == "4":
+            bitrate = _number(input_fn, "Target bitrate in kbps [24]: ", 24, 8, 64)
+            sample_rate = int(_choice(
+                input_fn,
+                "Sample rate in Hz (8000/11025/12000/16000/22050) [11025]: ",
+                {"8000", "11025", "12000", "16000", "22050"},
+                "11025",
+            ))
+        else:
+            bitrate, sample_rate = profiles[quality]
+        vbr_quality = 7
 
     output_fn("\nPhone speed and battery use:")
-    output_fn("  1) Battery saver — 1 download, 2 fragments")
-    output_fn("  2) Balanced — 2 downloads, 4 fragments (recommended)")
-    output_fn("  3) Faster on Wi-Fi — 3 downloads, 8 fragments")
-    speed = _choice(input_fn, "Choose speed [2]: ", {"1", "2", "3"}, "2")
+    output_fn("  1) Battery saver — 1 download, 1 encoder, 2 fragments")
+    output_fn("  2) Balanced — 4 downloads, up to 4 encoders, 8 fragments")
+    output_fn("  3) Maximum speed — 8 downloads, up to 8 encoders, 16 fragments")
+    output_fn("Maximum speed uses more battery and can make the phone warmer.")
+    speed = _choice(input_fn, "Choose speed [3]: ", {"1", "2", "3"}, "3")
+    balanced_encoders = min(4, default_convert_workers())
+    max_encoders = default_convert_workers()
     workloads = {
         "1": (1, 1, 2),
-        "2": (2, 1, 4),
-        "3": (3, 1, 8),
+        "2": (4, balanced_encoders, 8),
+        "3": (8, max_encoders, 16),
     }
     download_workers, convert_workers, fragments = workloads[speed]
 
@@ -115,9 +148,9 @@ def collect_settings(
     output_fn("Use 'original' by default, or enter a code from 'richmp3 languages URL'.")
     audio_language = input_fn("Preferred audio language [original]: ").strip() or "original"
 
-    default_output = Path.home() / "RichMP3"
+    default_output = default_output_directory()
     output_text = input_fn(
-        f"\nOutput folder [fast Termux internal storage: {default_output}]: "
+        f"\nOutput folder [Download folder: {default_output}]: "
     ).strip()
     output_path = str(Path(output_text).expanduser()) if output_text else str(default_output)
     zip_output = _yes_no(
@@ -125,11 +158,11 @@ def collect_settings(
         "Create a ZIP? Choose no for MP3-player files [n]: ",
         default=False,
     )
-    bitrate, sample_rate = bitrate_rate
     return {
         "format": "mp3",
         "audio_language": audio_language,
-        "mode": "cbr",
+        "mode": mode,
+        "vbr_quality": vbr_quality,
         "bitrate": bitrate,
         "sample_rate": sample_rate,
         "voice_filter": True,
@@ -142,8 +175,14 @@ def collect_settings(
 
 
 def _print_summary(settings: dict[str, object], output_fn: Output) -> None:
+    mode = str(settings["mode"])
+    encode_label = (
+        f"VBR Q{settings['vbr_quality']}"
+        if mode == "vbr"
+        else f"{mode.upper()} {settings['bitrate']} kbps"
+    )
     output_fn(
-        f"\nSelected: mono MP3, CBR {settings['bitrate']} kbps, "
+        f"\nSelected: mono MP3, {encode_label}, "
         f"{settings['sample_rate']} Hz, {settings['download_workers']} downloads, "
         f"{settings['convert_workers']} encoder(s), "
         f"language {settings['audio_language']}, "

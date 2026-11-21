@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
+import os
 
 from richmp3.config import (
     Settings,
+    default_output_directory,
     finalize,
     max_mp3_bitrate,
     snap_sample_rate,
@@ -59,7 +62,9 @@ class ConfigTests(unittest.TestCase):
     def test_mp3_bitrate_ceiling(self) -> None:
         self.assertEqual(max_mp3_bitrate(11025), 64)
         self.assertEqual(max_mp3_bitrate(22050), 160)
-        settings, notices = finalize(Settings(bitrate=128, sample_rate=11025))
+        settings, notices = finalize(
+            Settings(bitrate=128, sample_rate=11025, mode="abr")
+        )
         self.assertEqual(settings.bitrate, 64)
         self.assertTrue(notices)
 
@@ -83,9 +88,38 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(finalize(Settings(audio_format="opus"))[0].extension, "opus")
 
     def test_mode_label(self) -> None:
-        self.assertEqual(Settings().mode_label, "ABR")
+        self.assertEqual(Settings().mode_label, "VBR")
+        self.assertEqual(Settings().encoding_label, "VBR Q7")
+        self.assertEqual(Settings(mode="abr").mode_label, "ABR")
         self.assertEqual(Settings(mode="cbr").mode_label, "CBR")
         self.assertEqual(Settings(audio_format="opus", mode="cbr").mode_label, "VBR")
+
+    def test_vbr_quality_is_clamped(self) -> None:
+        settings, notices = finalize(Settings(vbr_quality=12))
+        self.assertEqual(settings.vbr_quality, 9)
+        self.assertTrue(any("VBR quality" in notice for notice in notices))
+
+    def test_termux_default_uses_android_download_folder(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"PREFIX": "/data/data/com.termux/files/usr", "TERMUX_VERSION": "0.118"},
+        ):
+            self.assertEqual(
+                default_output_directory(),
+                Path.home() / "storage" / "shared" / "Download",
+            )
+
+    def test_termux_requires_shared_storage_permission_for_default_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.dict(
+                    os.environ,
+                    {"PREFIX": "/data/data/com.termux/files/usr", "TERMUX_VERSION": "0.118"},
+                ),
+                patch("richmp3.config.Path.home", return_value=Path(tmp)),
+            ):
+                with self.assertRaisesRegex(ValueError, "termux-setup-storage"):
+                    finalize(Settings())
 
 
 class OrganizerTests(unittest.TestCase):

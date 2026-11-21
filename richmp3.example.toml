@@ -1,17 +1,19 @@
 # RichMP3 example configuration.
 # Copy to ./richmp3.toml or ~/.config/richmp3/config.toml, then edit.
-# Every value here is optional; the values shown are the defaults.
+# Every value here is optional. The output example is for Termux;
+# elsewhere RichMP3 defaults to ./downloads.
 
-output = "downloads"
+output = "~/storage/shared/Download" # Android Download folder in Termux
 bitrate = 24
+vbr_quality = 7
 sample_rate = 11025
 format = "mp3"        # mp3 | opus
 audio_language = "original" # original, or a code such as en or ar
-mode = "abr"          # abr | cbr (MP3 only; Opus is always VBR)
+mode = "vbr"          # vbr | abr | cbr (MP3 only; Opus is always VBR)
 voice_filter = true   # highpass/lowpass at <=16 kHz for clearer voice
 
-download_workers = 4
-convert_workers = 4  # lower this on phones to reduce heat/battery use
+download_workers = 8
+convert_workers = 8
 playlist = true
 zip = true
 zip_method = "stored" # stored | deflate
@@ -25,6 +27,6 @@ retries = 3
 number_width = 0      # 0 = auto, minimum 4 digits
 overwrite = false
 timeout = 30
-concurrent_fragments = 8
+concurrent_fragments = 16
 log_file = ""         # e.g. "~/richmp3.log"
 no_ui = false

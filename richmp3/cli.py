@@ -18,6 +18,8 @@ from .config import (
     Settings,
     config_path_default,
     default_convert_workers,
+    default_download_workers,
+    default_output_directory,
     finalize,
     load_config,
 )
@@ -65,11 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-o", "--output", default=None,
-        help="output directory (default: ./downloads)",
+        help="output directory (Termux: Android Download; other systems: ./downloads)",
     )
     parser.add_argument(
         "-b", "--bitrate", type=int, default=None,
-        help="target bitrate in kbps, 8-128 (default: 24)",
+        help="target bitrate for ABR/CBR and Opus, 8-128 kbps; ignored for MP3 VBR",
     )
     parser.add_argument(
         "-r", "--sample-rate", type=int, default=None,
@@ -84,7 +86,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mode", choices=MODES, default=None,
-        help="bitrate mode for MP3: abr (default) or cbr",
+        help="MP3 mode: vbr (default), abr, or cbr",
+    )
+    parser.add_argument(
+        "--vbr-quality",
+        type=int,
+        default=None,
+        help="MP3 VBR quality, 0-9 (default: 7; lower is clearer and larger)",
     )
     voice_group = parser.add_mutually_exclusive_group()
     voice_group.add_argument(
@@ -97,11 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-w", "--workers", dest="download_workers", type=int, default=None,
-        help="parallel download workers (default: 4)",
+        help="parallel download workers (default: 8)",
     )
     parser.add_argument(
         "--convert-workers", type=int, default=None,
-        help="parallel FFmpeg encoders (default: half the CPU cores, max 4)",
+        help="parallel FFmpeg encoders (default: CPU core count, max 8)",
     )
 
     playlist_group = parser.add_mutually_exclusive_group()
@@ -176,7 +184,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--fragments", dest="concurrent_fragments", type=int, default=None,
-        help="parallel fragments for HLS/DASH downloads (default: 8)",
+        help="parallel fragments for HLS/DASH downloads (default: 16)",
     )
     parser.add_argument(
         "--timeout", type=float, default=None,
@@ -464,8 +472,8 @@ def _print_banner(console: Console, settings: Settings) -> None:
     line.append(f" {__version__}", style="dim")
     line.append("  ·  ", style="grey50")
     line.append(
-        f"{settings.audio_format.upper()} {settings.mode_label} "
-        f"{settings.bitrate} kbps  ·  {settings.sample_rate} Hz  ·  mono",
+        f"{settings.audio_format.upper()} {settings.encoding_label} · "
+        f"{settings.sample_rate} Hz · mono",
         style="white",
     )
     line.append(f"  ·  {settings.download_workers}↓ {settings.convert_workers}⚙", style="dim")
@@ -489,7 +497,7 @@ def _build_settings(args: argparse.Namespace, config: dict[str, Any]) -> Setting
     if audio_format not in AUDIO_FORMATS:
         raise ValueError(f"format must be one of {', '.join(AUDIO_FORMATS)}")
 
-    mode = str(pick(args.mode, cfg.get("mode"), default="abr")).lower()
+    mode = str(pick(args.mode, cfg.get("mode"), default="vbr")).lower()
     if mode not in MODES:
         raise ValueError(f"mode must be one of {', '.join(MODES)}")
 
@@ -499,9 +507,12 @@ def _build_settings(args: argparse.Namespace, config: dict[str, Any]) -> Setting
 
     settings = Settings(
         output=Path(
-            str(pick(args.output, cfg.get("output"), default="downloads"))
+            str(pick(args.output, cfg.get("output"), default=default_output_directory()))
         ).expanduser(),
         bitrate=_as_int(pick(args.bitrate, cfg.get("bitrate"), default=24), "bitrate"),
+        vbr_quality=_as_int(
+            pick(args.vbr_quality, cfg.get("vbr_quality"), default=7), "vbr_quality"
+        ),
         sample_rate=_as_int(
             pick(
                 args.sample_rate,
@@ -520,7 +531,12 @@ def _build_settings(args: argparse.Namespace, config: dict[str, Any]) -> Setting
             "voice_filter",
         ),
         download_workers=_as_int(
-            pick(args.download_workers, cfg.get("download_workers"), default=4), "workers"
+            pick(
+                args.download_workers,
+                cfg.get("download_workers"),
+                default=default_download_workers(),
+            ),
+            "workers",
         ),
         convert_workers=_as_int(
             pick(args.convert_workers, cfg.get("convert_workers"), default=default_convert_workers()),
@@ -554,7 +570,12 @@ def _build_settings(args: argparse.Namespace, config: dict[str, Any]) -> Setting
         dry_run=bool(args.dry_run),
         timeout=_as_float(pick(args.timeout, cfg.get("timeout"), default=30.0), "timeout"),
         concurrent_fragments=_as_int(
-            pick(args.concurrent_fragments, cfg.get("concurrent_fragments"), default=8), "fragments"
+            pick(
+                args.concurrent_fragments,
+                cfg.get("concurrent_fragments"),
+                default=16,
+            ),
+            "fragments",
         ),
     )
     if settings.limit_rate:

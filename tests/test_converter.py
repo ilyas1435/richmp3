@@ -21,14 +21,16 @@ class CommandTests(unittest.TestCase):
         self.converter = Converter(Settings(), Log())
 
     def test_mp3_abr_command(self) -> None:
-        cmd = self.converter.build_command(Path("in.webm"), Path("out.mp3.part"))
+        settings, _ = finalize(Settings(mode="abr"))
+        converter = Converter(settings, Log())
+        cmd = converter.build_command(Path("in.webm"), Path("out.mp3.part"))
         joined = " ".join(cmd)
         self.assertIn("libmp3lame", joined)
         self.assertIn("-ac 1", joined)
         self.assertIn("-ar 11025", joined)
         self.assertIn("-b:a 24k", joined)
         self.assertIn("-abr 1", joined)
-        self.assertIn("-compression_level 5", joined)
+        self.assertIn("-compression_level 9", joined)
         self.assertIn("-af highpass=f=100,lowpass=f=5000", joined)
         self.assertEqual(cmd[-1], "out.mp3.part")
 
@@ -45,7 +47,16 @@ class CommandTests(unittest.TestCase):
     def test_mp3_cbr_has_no_abr_flag(self) -> None:
         settings, _ = finalize(Settings(mode="cbr"))
         converter = Converter(settings, Log())
-        self.assertNotIn("-abr", converter.build_command(Path("a"), Path("b")))
+        command = converter.build_command(Path("a"), Path("b"))
+        self.assertIn("-b:a 24k", " ".join(command))
+        self.assertNotIn("-abr", command)
+
+    def test_mp3_vbr_uses_default_quality_and_no_target_bitrate(self) -> None:
+        settings, _ = finalize(Settings())
+        converter = Converter(settings, Log())
+        command = converter.build_command(Path("a"), Path("b"))
+        self.assertIn("-q:a 7", " ".join(command))
+        self.assertNotIn("-b:a", command)
 
     def test_opus_command(self) -> None:
         settings, _ = finalize(Settings(audio_format="opus", bitrate=24))
@@ -89,7 +100,7 @@ class ConversionTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_mp3_conversion_is_mono_and_low_rate(self) -> None:
-        settings, _ = finalize(Settings(bitrate=24, sample_rate=11025))
+        settings, _ = finalize(Settings(bitrate=24, sample_rate=11025, mode="abr"))
         converter = Converter(settings, Log())
         target = self.dir / "out.mp3"
         progress: list[float] = []
@@ -127,6 +138,14 @@ class ConversionTests(unittest.TestCase):
             self.assertIn("codec_name=mp3", probe)
             self.assertIn("channels=1", probe)
             self.assertIn("sample_rate=11025", probe)
+
+    def test_default_vbr_conversion_succeeds(self) -> None:
+        settings, _ = finalize(Settings())
+        converter = Converter(settings, Log())
+        target = self.dir / "out-vbr.mp3"
+        converter.convert(self.source, target, duration=2.0)
+        self.assertTrue(target.is_file())
+        self.assertGreater(target.stat().st_size, 100)
 
     def test_opus_conversion(self) -> None:
         settings, _ = finalize(Settings(audio_format="opus", bitrate=24, sample_rate=8000))
