@@ -161,7 +161,6 @@ class PipelineTests(unittest.TestCase):
     def test_retry_recovers(self) -> None:
         self.settings = self.settings.with_overrides(retries=1)
         self.pipeline.settings = self.settings
-        self.pipeline._convert_gate = threading.BoundedSemaphore(1)
         downloader = self._install(FakeDownloader(fail_first={2: 1}))
         self.pipeline.run(["fake://playlist"])
 
@@ -169,6 +168,47 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(playlist.completed, 3)
         self.assertEqual(playlist.tracks[1].attempts, 2)
         self.assertEqual(downloader.calls[2], 2)
+
+    def test_encoding_starts_while_later_downloads_run(self) -> None:
+        """Producer/consumer proof: track 1 encodes while track 2 still downloads."""
+        second_started = threading.Event()
+        release_second = threading.Event()
+        encoded_first = threading.Event()
+
+        class BlockingDownloader(FakeDownloader):
+            def download(self, track, temp_dir, on_progress=None, cancel_event=None):
+                if track.index == 2:
+                    second_started.set()
+                    if not release_second.wait(10):
+                        raise DownloadError("test timeout")
+                return super().download(track, temp_dir, on_progress, cancel_event)
+
+        class ObservingConverter(FakeConverter):
+            def convert(self, src, dst, duration, on_progress=None, cancel_event=None):
+                result = super().convert(src, dst, duration, on_progress, cancel_event)
+                if Path(src).name == "raw-0001.wav":
+                    encoded_first.set()
+                return result
+
+        # One download worker: track 2 cannot start until track 1 is handed off.
+        self.pipeline.settings = self.settings.with_overrides(
+            download_workers=1, convert_workers=1
+        )
+        self.pipeline.downloader = BlockingDownloader()
+        self.pipeline._converter = ObservingConverter()
+
+        worker = threading.Thread(target=self.pipeline.run, args=(["fake://playlist"],))
+        worker.start()
+        try:
+            self.assertTrue(
+                encoded_first.wait(10),
+                "encode did not start while a later download was still running",
+            )
+            self.assertTrue(second_started.is_set())
+        finally:
+            release_second.set()
+            worker.join(15)
+        self.assertFalse(worker.is_alive())
 
     def test_cancel_stops_cleanly(self) -> None:
         downloader = self._install(FakeDownloader())

@@ -13,13 +13,17 @@ from .utils import Cancelled, Log, parse_rate
 
 ProgressCallback = Callable[[float, int, int | None, float | None, float | None], None]
 
-# Strictly prefer the lowest-bandwidth audio stream.  The language_preference
-# filter makes yt-dlp ignore AI-dubbed / localised audio tracks (YouTube sets 10
-# for the original, 5 for the default and -1 for dubs), so the original track is
-# kept even though it is not necessarily the smallest.  `best` is only a last
-# resort for sites that expose a single progressive (video+audio) file.
+# Strictly prefer the lowest-bandwidth audio stream.  m4a (AAC) and webm (Opus)
+# are tried first because FFmpeg demuxes/decodes them fastest; the
+# language_preference filter keeps the original track instead of an AI dub
+# (YouTube sets 10 for original, 5 for default, -1 for dubs).  `worst`/`best`
+# is only a last resort for sites that expose a single progressive file.
 _FORMAT_SELECTOR = (
+    "worstaudio[ext=m4a][language_preference>0]/"
+    "worstaudio[ext=webm][language_preference>0]/"
     "worstaudio[language_preference>0]/"
+    "worstaudio[ext=m4a]/"
+    "worstaudio[ext=webm]/"
     "worstaudio/worst/best"
 )
 

@@ -63,8 +63,19 @@ class Converter:
             "1",
         ]
 
+        voice_filter = self._voice_filter(s)
+        if voice_filter:
+            cmd += ["-af", voice_filter]
+
         if s.audio_format == "mp3":
-            cmd += ["-c:a", "libmp3lame", "-b:a", f"{s.bitrate}k"]
+            cmd += [
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                f"{s.bitrate}k",
+                "-compression_level",
+                "5",
+            ]
             if s.mode == "abr":
                 cmd += ["-abr", "1"]
             cmd += ["-id3v2_version", "3", "-write_id3v1", "0"]
@@ -95,6 +106,20 @@ class Converter:
             str(dst),
         ]
         return cmd
+
+    @staticmethod
+    def _voice_filter(settings: Settings) -> str | None:
+        """Strip rumble/hiss for low-rate voice encodes.
+
+        Only applied at <=16 kHz, where the material is voice-oriented and the
+        band above ~5 kHz carries mostly noise.  Music at 22.05 kHz or higher is
+        left untouched.
+        """
+        if not settings.voice_filter or settings.sample_rate > 16000:
+            return None
+        lowpass = min(5000, settings.sample_rate // 2 - 200)
+        highpass = min(100, max(20, settings.sample_rate // 10))
+        return f"highpass=f={highpass},lowpass=f={lowpass}"
 
     # -- metadata -------------------------------------------------------------
 

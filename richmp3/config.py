@@ -29,6 +29,7 @@ CONFIG_KEYS = frozenset(
         "sample_rate",
         "format",
         "mode",
+        "voice_filter",
         "download_workers",
         "convert_workers",
         "playlist",
@@ -68,6 +69,7 @@ class Settings:
     sample_rate: int = 11025
     audio_format: str = "mp3"
     mode: str = "abr"
+    voice_filter: bool = True
 
     download_workers: int = 4
     convert_workers: int = default_convert_workers()

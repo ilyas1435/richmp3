@@ -7,6 +7,7 @@ bitrate = 24
 sample_rate = 11025
 format = "mp3"        # mp3 | opus
 mode = "abr"          # abr | cbr (MP3 only; Opus is always VBR)
+voice_filter = true   # highpass/lowpass at <=16 kHz for clearer voice
 
 download_workers = 4
 convert_workers = 4  # lower this on phones to reduce heat/battery use

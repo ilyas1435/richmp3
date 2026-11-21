@@ -23,19 +23,24 @@ Overall █████████████░░░░░░░░░░░
 ## Features
 
 - **Bandwidth-first download** — strictly the lowest-bandwidth `worstaudio`
-  stream (original-language only, dubs filtered), with `worst`/`best` only as a
-  last resort for sites that expose a single progressive file.
+  stream (original-language only, dubs filtered), preferring `m4a`/`webm`
+  containers that demux fastest, with `worst`/`best` only as a last resort for
+  sites that expose a single progressive file.
 - **Original language track** — dubbed/localised audio is filtered out with
   yt-dlp's `language_preference` metadata; the original or default track wins.
 - **Configurable encoding** — 8–128 kbps, 8000–44100 Hz, always mono.
-  Default: MP3, ABR 24 kbps, 11025 Hz.
+  Default: MP3, ABR 24 kbps, 11025 Hz, LAME `-compression_level 5`.
+- **Voice-clarity filter** — at ≤16 kHz, `highpass=f=100,lowpass=f=5000` strips
+  rumble and hiss for clearer speech and slightly smaller files. Disable with
+  `--no-voice-filter`.
 - **Sequential, Unicode-safe names** — `0001 - العنوان.mp3` with NFC
   normalisation, bidi-control stripping and byte-safe UTF-8 truncation.
 - **Playlists and channels** — resolved once, downloaded item by item into one
   folder per playlist, in order.
-- **Parallel by design** — a download worker pool plus a capped FFmpeg encoder
-  pool; fragmented HLS/DASH downloads fetch up to 8 fragments at once, and each
-  encoder is pinned to one thread so many encodes never oversubscribe the CPU.
+- **Parallel producer/consumer** — separate download and encoder pools: a track
+  starts encoding the moment its download finishes while later tracks keep
+  downloading. Fragmented HLS/DASH downloads fetch up to 8 fragments at once,
+  and each encoder is pinned to one thread.
 - **Self-cleaning** — every raw download is deleted right after a successful
   conversion; only final files and the ZIP remain. When zipping succeeds the
   duplicate source folder is deleted too (`--keep-folder` opts out).
@@ -104,6 +109,8 @@ Exit codes: `0` success, `1` one or more failures, `2` setup error
 | sample rate | `11025` Hz | `11000` is not a legal MP3 rate, so input snaps to the closest legal rate; Opus defaults to 12000 Hz |
 | channels | mono | always `-ac 1` |
 | mode | ABR | LAME `-abr 1` (variable bitrate around the target) |
+| MP3 quality | `compression_level 5` | balanced LAME speed/size |
+| voice filter | on at ≤16 kHz | `highpass=100, lowpass=5000`; off with `--no-voice-filter` |
 | container | MP3 | `--format opus` produces Ogg/Opus |
 | download workers | `4` | parallel tracks |
 | encode workers | CPU/2, max 4 | caps simultaneous FFmpeg processes (`-threads 1` each) |
@@ -165,6 +172,7 @@ bitrate = 24
 sample_rate = 11025
 format = "mp3"        # mp3 | opus
 mode = "abr"          # abr | cbr
+voice_filter = true   # strip rumble/hiss at <=16 kHz (clearer voice, smaller files)
 download_workers = 4
 convert_workers = 4
 playlist = true
@@ -219,9 +227,13 @@ cancellation and every UI render width.
 - Shared storage (`/storage/emulated/0`) is FUSE-backed. Parallel writes are
   much slower there than on internal storage; `-w 4` is a sensible ceiling and
   `convert_workers = 2` avoids thermal throttling.
+- Downloads and encodes run in separate pools. A slow encode never idles a
+  download worker, so playlists stay network-saturated until the last file.
 - Downloads are network-bound and fragmented media (`concurrent_fragments = 8`)
   benefits the most from parallelism.
 - `--no-zip` saves a full read/write pass of the playlist on slow storage.
+- `--no-voice-filter` keeps full-band audio if you are archiving music rather
+  than speech.
 - FFmpeg runs as a child process; `Ctrl+C` terminates the process group and
   removes partial encodes.
 

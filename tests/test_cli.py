@@ -22,6 +22,7 @@ class CliSettingsTests(unittest.TestCase):
         self.assertTrue(settings.playlist)
         self.assertTrue(settings.zip_output)
         self.assertEqual(settings.mode_label, "ABR")
+        self.assertTrue(settings.voice_filter)
         self.assertEqual(settings.js_runtime, "auto")
         self.assertFalse(settings.keep_folder)
         self.assertEqual(settings.concurrent_fragments, 8)
@@ -50,6 +51,14 @@ class CliSettingsTests(unittest.TestCase):
         self.assertEqual(settings.convert_workers, 1)
         self.assertTrue(settings.no_ui)
         self.assertFalse(settings.force_ui)
+
+    def test_voice_filter_flags(self) -> None:
+        settings, _ = finalize(_build_settings(self.parse(["URL"]), {}))
+        self.assertTrue(settings.voice_filter)
+        settings, _ = finalize(_build_settings(self.parse(["--no-voice-filter", "URL"]), {}))
+        self.assertFalse(settings.voice_filter)
+        settings, _ = finalize(_build_settings(self.parse(["URL"]), {"voice_filter": False}))
+        self.assertFalse(settings.voice_filter)
 
     def test_keep_folder_flags(self) -> None:
         settings, _ = finalize(_build_settings(self.parse(["--keep-folder", "URL"]), {}))
@@ -109,8 +118,10 @@ class CliSettingsTests(unittest.TestCase):
     def test_format_selector_is_strict_worstaudio(self) -> None:
         self.assertIn("worstaudio", _FORMAT_SELECTOR)
         self.assertIn("language_preference>0", _FORMAT_SELECTOR)
+        self.assertIn("worstaudio[ext=m4a]", _FORMAT_SELECTOR)
+        self.assertIn("worstaudio[ext=webm]", _FORMAT_SELECTOR)
         self.assertNotIn("bestaudio", _FORMAT_SELECTOR)
-        self.assertTrue(_FORMAT_SELECTOR.startswith("worstaudio"))
+        self.assertTrue(_FORMAT_SELECTOR.startswith("worstaudio[ext=m4a]"))
         self.assertTrue(_FORMAT_SELECTOR.endswith("/worst/best"))
 
 

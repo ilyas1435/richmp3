@@ -28,7 +28,19 @@ class CommandTests(unittest.TestCase):
         self.assertIn("-ar 11025", joined)
         self.assertIn("-b:a 24k", joined)
         self.assertIn("-abr 1", joined)
+        self.assertIn("-compression_level 5", joined)
+        self.assertIn("-af highpass=f=100,lowpass=f=5000", joined)
         self.assertEqual(cmd[-1], "out.mp3.part")
+
+    def test_voice_filter_can_be_disabled(self) -> None:
+        settings, _ = finalize(Settings(voice_filter=False))
+        converter = Converter(settings, Log())
+        self.assertNotIn("-af", converter.build_command(Path("a"), Path("b")))
+
+    def test_voice_filter_skipped_for_music_rates(self) -> None:
+        settings, _ = finalize(Settings(sample_rate=22050))
+        converter = Converter(settings, Log())
+        self.assertNotIn("-af", converter.build_command(Path("a"), Path("b")))
 
     def test_mp3_cbr_has_no_abr_flag(self) -> None:
         settings, _ = finalize(Settings(mode="cbr"))
@@ -44,6 +56,7 @@ class CommandTests(unittest.TestCase):
         self.assertIn("-ar 12000", joined)
         self.assertIn("-f ogg", joined)
         self.assertIn("-vbr on", joined)
+        self.assertIn("-af highpass=f=100,lowpass=f=5000", joined)
 
 
 @unittest.skipUnless(FFMPEG, "ffmpeg not installed")

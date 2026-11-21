@@ -70,6 +70,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode", choices=MODES, default=None,
         help="bitrate mode for MP3: abr (default) or cbr",
     )
+    voice_group = parser.add_mutually_exclusive_group()
+    voice_group.add_argument(
+        "--voice-filter", dest="voice_filter", action="store_true", default=None,
+        help="high-pass/low-pass filter at <=16 kHz for clearer voice (default)",
+    )
+    voice_group.add_argument(
+        "--no-voice-filter", dest="voice_filter", action="store_false",
+        help="disable the voice-clarity filter",
+    )
     parser.add_argument(
         "-w", "--workers", dest="download_workers", type=int, default=None,
         help="parallel download workers (default: 4)",
@@ -300,6 +309,10 @@ def _build_settings(args: argparse.Namespace, config: dict[str, Any]) -> Setting
         ),
         audio_format=audio_format,
         mode=mode,
+        voice_filter=_as_bool(
+            pick(args.voice_filter, cfg.get("voice_filter"), default=True),
+            "voice_filter",
+        ),
         download_workers=_as_int(
             pick(args.download_workers, cfg.get("download_workers"), default=4), "workers"
         ),
