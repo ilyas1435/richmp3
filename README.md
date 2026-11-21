@@ -9,7 +9,7 @@ Unicode (Arabic included), and archives each finished playlist as a ZIP — all
 while a live Rich dashboard shows per-track and overall progress.
 
 ```
-RichMP3   قائمة أغاني عربية   12 tracks · 7 done
+RichMP3   قائمة القرآن الكريم   12 tracks · 7 done
 MP3 · ABR 24 kbps · 11025 Hz · mono · 4↓ 4⚙
 
 Overall █████████████░░░░░░░░░░░   58.2%   7/12
@@ -133,11 +133,11 @@ the encoder; the requested rate still controls the encoded bandwidth.
 
 ```
 downloads/
-├── قائمة أغاني عربية/
-│   ├── 0001 - أغنية أولى.mp3
-│   ├── 0002 - أغنية ثانية.mp3
-│   └── 0003 - أغنية ثالثة.mp3
-└── قائمة أغاني عربية.zip
+├── قائمة قصائد عربية/
+│   ├── 0001 -  أولى.mp3
+│   ├── 0002 -  ثانية.mp3
+│   └── 0003 -  ثالثة.mp3
+└── قائمة قصائد عربية.zip
 ```
 
 - Folder name = playlist/channel title (sanitised, never transliterated).
