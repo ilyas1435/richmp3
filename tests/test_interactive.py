@@ -6,7 +6,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from richmp3.config import default_convert_workers, default_output_directory
-from richmp3.interactive import configure_interactively, save_settings_interactively
+from richmp3.interactive import (
+    configure_interactively,
+    save_profile_interactively,
+    save_settings_interactively,
+)
+from richmp3.profiles import load_profile
 
 
 class InteractiveWizardTests(unittest.TestCase):
@@ -21,7 +26,7 @@ class InteractiveWizardTests(unittest.TestCase):
 
     def test_recommended_lecture_profile_uses_compatible_phone_settings(self) -> None:
         result, output = self.run_wizard(
-            ["", "", "", "", "", "", "https://example.test/list", ""]
+            ["", "", "32", "", "", "", "", "https://example.test/list", ""]
         )
         self.assertIsNotNone(result)
         self.assertTrue(any("Quick audio setup" in line for line in output))
@@ -32,7 +37,7 @@ class InteractiveWizardTests(unittest.TestCase):
         self.assertEqual(settings["format"], "mp3")
         self.assertEqual(settings["mode"], "vbr")
         self.assertEqual(settings["vbr_quality"], 7)
-        self.assertEqual(settings["bitrate"], 24)
+        self.assertEqual(settings["bitrate"], 32)
         self.assertEqual(settings["sample_rate"], 11025)
         self.assertEqual(settings["download_workers"], 8)
         self.assertEqual(settings["convert_workers"], default_convert_workers())
@@ -60,7 +65,7 @@ class InteractiveWizardTests(unittest.TestCase):
 
     def test_user_can_cancel_before_starting(self) -> None:
         result, output = self.run_wizard(
-            ["1", "1", "1", "", "", "", "https://example.test", "no"]
+            ["1", "1", "", "1", "", "", "", "https://example.test", "no"]
         )
         self.assertIsNone(result)
         self.assertTrue(any("Cancelled" in line for line in output))
@@ -97,6 +102,21 @@ class InteractiveWizardTests(unittest.TestCase):
             self.assertEqual(config["retries"], 5)
             self.assertEqual(config["custom_option"], "keep")
             self.assertEqual(config["custom"]["bitrate"], 7)
+
+    def test_vbr_target_bitrate_is_saved_for_abr_and_cbr(self) -> None:
+        with TemporaryDirectory() as tmp:
+            answers = iter(["", "", "32", "", "", "", "", ""])
+            saved = save_profile_interactively(
+                "lecture",
+                input_fn=lambda _prompt: next(answers),
+                output_fn=lambda _line: None,
+                profile_dir=Path(tmp),
+            )
+            self.assertEqual(saved, Path(tmp) / "lecture.toml")
+            profile = load_profile("lecture", Path(tmp))
+            self.assertEqual(profile["mode"], "vbr")
+            self.assertEqual(profile["vbr_quality"], 7)
+            self.assertEqual(profile["bitrate"], 32)
 
 
 if __name__ == "__main__":

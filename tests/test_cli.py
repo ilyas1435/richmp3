@@ -79,6 +79,16 @@ class CliSettingsTests(unittest.TestCase):
         self.assertTrue(self.parse(["--settings"]).settings)
         self.assertTrue(self.parse(["--update"]).update)
 
+    def test_profile_cli_options_and_friendly_commands(self) -> None:
+        args = self.parse(["-p", "lecture", "URL"])
+        self.assertEqual(args.profile_name, "lecture")
+        self.assertEqual(_normalize_command(["profile", "save", "lecture"]),
+                         ["--save-profile", "lecture"])
+        self.assertEqual(_normalize_command(["profile", "list"]), ["--list-profiles"])
+        self.assertEqual(_normalize_command(["profiles"]), ["--list-profiles"])
+        with self.assertRaises(ValueError):
+            _normalize_command(["profile", "remove", "lecture"])
+
     def test_friendly_commands_map_to_cli_actions(self) -> None:
         self.assertEqual(_normalize_command(["update"]), ["--update"])
         self.assertEqual(_normalize_command(["settings", "--config", "my.toml"]),
@@ -93,7 +103,7 @@ class CliSettingsTests(unittest.TestCase):
 
     def test_running_without_arguments_opens_english_menu(self) -> None:
         output = StringIO()
-        with patch("builtins.input", return_value="4"), redirect_stdout(output):
+        with patch("builtins.input", return_value="6"), redirect_stdout(output):
             self.assertEqual(main([]), 0)
         self.assertIn("Change and save settings", output.getvalue())
         self.assertNotRegex(output.getvalue(), r"[\u0600-\u06FF]")
@@ -132,7 +142,7 @@ class CliSettingsTests(unittest.TestCase):
         with Path("pyproject.toml").open("rb") as config_file:
             config = tomllib.load(config_file)
         self.assertEqual(__version__, config["project"]["version"])
-        self.assertEqual(__version__, "1.6.0")
+        self.assertEqual(__version__, "1.7.0")
 
     def test_flags_override(self) -> None:
         settings, _ = finalize(

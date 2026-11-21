@@ -16,6 +16,7 @@ from .config import (
     default_convert_workers,
     default_output_directory,
 )
+from .profiles import profile_path, save_profile, validate_profile_name
 
 Input = Callable[[str], str]
 Output = Callable[[str], object]
@@ -73,6 +74,35 @@ def save_settings_interactively(
     return path
 
 
+def save_profile_interactively(
+    name: str,
+    input_fn: Input = input,
+    output_fn: Output = print,
+    profile_dir: Path | None = None,
+) -> Path | None:
+    """Collect settings and save them under a reusable short name."""
+    validate_profile_name(name)
+    settings = collect_settings(input_fn, output_fn)
+    if settings is None:
+        return None
+    _print_summary(settings, output_fn)
+    path = profile_path(name, profile_dir)
+    overwrite = path.exists()
+    if overwrite and not _yes_no(
+        input_fn, f"Replace the existing '{name}' profile? [y/N]: ", default=False
+    ):
+        output_fn("Profile was not changed.")
+        return None
+    if not _yes_no(input_fn, f"Save these settings as profile '{name}'? [Y/n]: ", default=True):
+        output_fn("Profile was not changed.")
+        return None
+    saved = save_profile(name, settings, profile_dir, overwrite=overwrite)
+    output_fn(
+        f"Profile '{name}' saved. Use 'richmp3 -p {name} URL' to apply it."
+    )
+    return saved
+
+
 def collect_settings(
     input_fn: Input = input,
     output_fn: Output = print,
@@ -100,7 +130,10 @@ def collect_settings(
             if quality == "4"
             else vbr_presets[quality]
         )
-        bitrate = 24
+        output_fn(
+            "\nABR/CBR target bitrate (saved for those modes; VBR ignores it):"
+        )
+        bitrate = _number(input_fn, "Target bitrate [24 kbps]: ", 24, 8, 64)
         sample_rate = {"1": 11025, "2": 11025, "3": 16000}.get(quality, 11025)
         if quality == "4":
             sample_rate = int(_choice(
@@ -177,7 +210,8 @@ def collect_settings(
 def _print_summary(settings: dict[str, object], output_fn: Output) -> None:
     mode = str(settings["mode"])
     encode_label = (
-        f"VBR Q{settings['vbr_quality']}"
+        f"VBR Q{settings['vbr_quality']} "
+        f"(ABR/CBR target {settings['bitrate']} kbps saved)"
         if mode == "vbr"
         else f"{mode.upper()} {settings['bitrate']} kbps"
     )

@@ -34,6 +34,9 @@ commands:
   richmp3                         open the interactive menu
   richmp3 download URL            download a track or playlist
   richmp3 settings                change and save defaults
+  richmp3 profile save NAME       save named settings
+  richmp3 profiles                list saved profiles
+  richmp3 -p NAME URL             use named settings
   richmp3 update                  check GitHub and pull safe updates
   richmp3 languages URL           list available audio languages
   richmp3 help                    show all download options
@@ -42,6 +45,8 @@ download examples:
   richmp3 "https://www.youtube.com/playlist?list=..."
   richmp3 download URL
   richmp3 settings
+  richmp3 profile save lecture
+  richmp3 -p lecture URL
   richmp3 update
   richmp3 -b 32 -r 22050 --no-zip URL1 URL2
   richmp3 --format opus -b 24 -o ~/Music URL
@@ -224,6 +229,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="check GitHub and fast-forward this clean checkout",
     )
+    profile_group = parser.add_mutually_exclusive_group()
+    profile_group.add_argument(
+        "-p", "--profile", dest="profile_name",
+        help="apply a saved settings profile",
+    )
+    profile_group.add_argument(
+        "--save-profile", metavar="NAME",
+        help="interactively save settings under a short profile name",
+    )
+    profile_group.add_argument(
+        "--list-profiles", action="store_true",
+        help="list saved settings profiles",
+    )
     parser.add_argument("--version", action="version", version=f"richmp3 {__version__}")
     return parser
 
@@ -232,10 +250,20 @@ def main(argv: list[str] | None = None) -> int:
     command_line = list(sys.argv[1:] if argv is None else argv)
     if not command_line:
         return _interactive_home()
-    command_line = _normalize_command(command_line)
     parser = build_parser()
+    try:
+        command_line = _normalize_command(command_line)
+    except ValueError as exc:
+        parser.error(str(exc))
     args = parser.parse_args(command_line)
     console = Console(highlight=False)
+
+    if args.profile_name and args.wizard:
+        parser.error("--profile cannot be combined with --wizard")
+    if args.profile_name and args.settings:
+        parser.error("--profile cannot be combined with --settings")
+    if args.list_profiles and args.urls:
+        parser.error("profile listing does not accept URLs")
 
     if args.update:
         from .updater import update_from_github
@@ -243,6 +271,30 @@ def main(argv: list[str] | None = None) -> int:
         result = update_from_github()
         console.print(result.message)
         return 0 if result.ok else 1
+
+    if args.list_profiles:
+        from .profiles import list_profiles
+
+        names = list_profiles()
+        if not names:
+            console.print("No saved profiles. Create one with 'richmp3 profile save NAME'.")
+        else:
+            console.print("Saved profiles:")
+            for name in names:
+                console.print(f"  {name}  (use: richmp3 -p {name} URL)")
+        return 0
+
+    if args.save_profile:
+        if args.urls:
+            parser.error("saving a profile does not accept URLs")
+        from .interactive import save_profile_interactively
+
+        try:
+            save_profile_interactively(args.save_profile)
+        except (OSError, ValueError, TypeError) as exc:
+            console.print(f"Could not save profile: {exc}")
+            return 1
+        return 0
 
     if args.settings:
         from .interactive import save_settings_interactively
@@ -282,6 +334,10 @@ def main(argv: list[str] | None = None) -> int:
             if not config_file.is_file():
                 parser.error(f"config file not found: {config_file}")
             config = load_config(config_file)
+        if args.profile_name:
+            from .profiles import load_profile
+
+            config.update(load_profile(args.profile_name))
         config.update(wizard_settings)
         settings = _build_settings(args, config)
         settings, notices = finalize(settings)
@@ -422,9 +478,18 @@ def _normalize_command(argv: list[str]) -> list[str]:
         "update": "--update",
         "wizard": "--wizard",
         "languages": "--list-audio-languages",
+        "profiles": "--list-profiles",
         "help": "--help",
         "version": "--version",
     }
+    if command == "profile":
+        if rest == ["list"]:
+            return ["--list-profiles"]
+        if len(rest) == 2 and rest[0] == "save":
+            return ["--save-profile", rest[1]]
+        raise ValueError(
+            "use 'richmp3 profile save NAME' or 'richmp3 profile list'"
+        )
     if command == "download":
         return rest
     if command in aliases:
@@ -439,9 +504,11 @@ def _interactive_home() -> int:
         console.print("  1) Download")
         console.print("  2) Change and save settings")
         console.print("  3) Check for updates")
-        console.print("  4) Exit")
+        console.print("  4) Save named settings")
+        console.print("  5) List saved profiles")
+        console.print("  6) Exit")
         try:
-            choice = input("Choose an option [1-4]: ").strip()
+            choice = input("Choose an option [1-6]: ").strip()
         except (EOFError, KeyboardInterrupt):
             console.print("Menu closed.")
             return 0
@@ -449,12 +516,23 @@ def _interactive_home() -> int:
             "1": ["--wizard"],
             "2": ["--settings"],
             "3": ["--update"],
-            "4": None,
+            "5": ["--list-profiles"],
+            "6": None,
         }
+        if choice == "4":
+            try:
+                name = input("Short profile name (example: lecture): ").strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print("Menu closed.")
+                return 0
+            if not name:
+                console.print("Profile name is required.")
+                continue
+            return main(["--save-profile", name])
         if choice in actions:
             action = actions[choice]
             return 0 if action is None else main(action)
-        console.print("Choose 1, 2, 3, or 4.")
+        console.print("Choose a number from 1 to 6.")
 
 
 def _require_ffmpeg(console: Console) -> None:

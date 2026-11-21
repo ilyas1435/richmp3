@@ -99,6 +99,11 @@ richmp3 wizard
 # Change and save defaults
 richmp3 settings
 
+# Save and reuse named settings
+richmp3 profile save lecture
+richmp3 profiles
+richmp3 -p lecture URL
+
 # Check GitHub and safely pull fast-forward updates
 richmp3 update
 
@@ -154,6 +159,17 @@ options remain available.
 The saved settings menu stores choices in the active `richmp3.toml` or the
 user config at `~/.config/richmp3/config.toml`. Run `richmp3 settings` to edit
 them; command-line options still override saved values.
+
+VBR uses a quality scale rather than a target bitrate. The settings wizard
+still asks for an ABR/CBR target bitrate to keep it ready for those modes; that
+value does not affect VBR encoding. Choose ABR or CBR in the wizard to encode
+at the selected target bitrate.
+
+Save a separate reusable setup with `richmp3 profile save lecture`; profile
+names use lowercase letters, numbers, hyphens, or underscores. Apply it to a
+download with `richmp3 -p lecture URL` (or `richmp3 --profile lecture URL`).
+Use `richmp3 profiles` to list saved profiles. Command-line options override
+the selected profile. Saving an existing name asks before replacing it.
 
 `richmp3 update` checks the configured GitHub upstream and pulls
 only when the checkout is clean and can be fast-forwarded. It never stashes,
