@@ -7,8 +7,8 @@ import os
 import re
 import shlex
 import tempfile
-from pathlib import Path
 import tomllib
+from pathlib import Path
 from typing import Callable
 
 from .config import config_path_default
@@ -30,20 +30,20 @@ def configure_interactively(
         return None
 
     urls_text = input_fn(
-        "\nالصق رابطًا واحدًا أو عدة روابط (افصل بينها بمسافات): "
+        "\nPaste one URL or multiple URLs separated by spaces: "
     ).strip()
     try:
         urls = shlex.split(urls_text)
     except ValueError:
-        output_fn("تعذر قراءة الروابط؛ راجع علامات الاقتباس.")
+        output_fn("Could not parse URLs. Check the quotation marks.")
         return None
     if not urls:
-        output_fn("لم يتم إدخال أي رابط.")
+        output_fn("No URL was entered.")
         return None
 
     _print_summary(settings, output_fn)
-    if not _yes_no(input_fn, "بدء التنزيل بهذه الإعدادات؟ [نعم]: ", default=True):
-        output_fn("أُلغي التشغيل دون تغيير أي ملفات.")
+    if not _yes_no(input_fn, "Start downloading with these settings? [Y/n]: ", default=True):
+        output_fn("Cancelled. No files were changed.")
         return None
     return urls, settings
 
@@ -61,11 +61,11 @@ def save_settings_interactively(
     path = config_path or config_path_default()
     if path is None:
         path = Path.home() / ".config" / "richmp3" / "config.toml"
-    if not _yes_no(input_fn, f"حفظ الإعدادات في {path}؟ [نعم]: ", default=True):
-        output_fn("لم يتم تغيير الإعدادات.")
+    if not _yes_no(input_fn, f"Save these settings to {path}? [Y/n]: ", default=True):
+        output_fn("Settings were not changed.")
         return None
     write_settings(path, settings)
-    output_fn(f"تم حفظ الإعدادات. غيّرها لاحقًا بالأمر: python -m richmp3 --settings")
+    output_fn("Settings saved. Run 'richmp3 settings' to change them later.")
     return path
 
 
@@ -74,24 +74,24 @@ def collect_settings(
     output_fn: Output = print,
 ) -> dict[str, object] | None:
     """Prompt for speech quality, phone workload, output, and archive settings."""
-    output_fn("\nإعداد سريع للصوتيات والمحاضرات")
-    output_fn("كل الخيارات تحفظ MP3 أحادي القناة لتوافق أفضل مع مشغلات MP3.")
-    output_fn("\nجودة الصوت وحجم الملف:")
-    output_fn("  1) أصغر حجم — 16 kbps، 11025 Hz (الصوت أقل وضوحًا)")
-    output_fn("  2) متوازن للمحاضرات — 24 kbps، 11025 Hz (موصى به)")
-    output_fn("  3) أوضح — 32 kbps، 16000 Hz")
-    output_fn("  4) تحديد يدوي")
-    quality = _choice(input_fn, "اختيار الجودة [2]: ", {"1", "2", "3", "4"}, "2")
+    output_fn("\nQuick audio setup")
+    output_fn("All presets create mono MP3 for broad MP3-player compatibility.")
+    output_fn("\nAudio quality and file size:")
+    output_fn("  1) Smallest — 16 kbps, 11025 Hz (less clear speech)")
+    output_fn("  2) Balanced for lectures — 24 kbps, 11025 Hz (recommended)")
+    output_fn("  3) Clearer speech — 32 kbps, 16000 Hz")
+    output_fn("  4) Custom")
+    quality = _choice(input_fn, "Choose quality [2]: ", {"1", "2", "3", "4"}, "2")
     profiles = {
         "1": (16, 11025),
         "2": (24, 11025),
         "3": (32, 16000),
     }
     if quality == "4":
-        bitrate = _number(input_fn, "معدل الضغط kbps [24]: ", 24, 8, 64)
+        bitrate = _number(input_fn, "Target bitrate in kbps [24]: ", 24, 8, 64)
         sample_rate = _choice(
             input_fn,
-            "معدل العينة Hz (8000/11025/12000/16000/22050) [11025]: ",
+            "Sample rate in Hz (8000/11025/12000/16000/22050) [11025]: ",
             {"8000", "11025", "12000", "16000", "22050"},
             "11025",
         )
@@ -99,11 +99,11 @@ def collect_settings(
     else:
         bitrate_rate = profiles[quality]
 
-    output_fn("\nسرعة التنزيل واستهلاك الهاتف:")
-    output_fn("  1) توفير البطارية — تنزيل واحد، جزآن متوازيان")
-    output_fn("  2) متوازن — تنزيلان، 4 أجزاء (موصى به)")
-    output_fn("  3) أسرع على Wi-Fi — 3 تنزيلات، 8 أجزاء")
-    speed = _choice(input_fn, "اختيار السرعة [2]: ", {"1", "2", "3"}, "2")
+    output_fn("\nPhone speed and battery use:")
+    output_fn("  1) Battery saver — 1 download, 2 fragments")
+    output_fn("  2) Balanced — 2 downloads, 4 fragments (recommended)")
+    output_fn("  3) Faster on Wi-Fi — 3 downloads, 8 fragments")
+    speed = _choice(input_fn, "Choose speed [2]: ", {"1", "2", "3"}, "2")
     workloads = {
         "1": (1, 1, 2),
         "2": (2, 1, 4),
@@ -113,12 +113,12 @@ def collect_settings(
 
     default_output = Path.home() / "RichMP3"
     output_text = input_fn(
-        f"\nمجلد الحفظ [تخزين Termux الداخلي الأسرع: {default_output}]: "
+        f"\nOutput folder [fast Termux internal storage: {default_output}]: "
     ).strip()
     output_path = str(Path(output_text).expanduser()) if output_text else str(default_output)
     zip_output = _yes_no(
         input_fn,
-        "إنشاء ZIP؟ اختر لا لتشغيل ملفات MP3 مباشرة [لا]: ",
+        "Create a ZIP? Choose no for MP3-player files [n]: ",
         default=False,
     )
     bitrate, sample_rate = bitrate_rate
@@ -138,10 +138,10 @@ def collect_settings(
 
 def _print_summary(settings: dict[str, object], output_fn: Output) -> None:
     output_fn(
-        f"\nالمقترح: MP3 أحادي، CBR {settings['bitrate']} kbps، "
-        f"{settings['sample_rate']} Hz، {settings['download_workers']} تنزيل، "
-        f"{settings['convert_workers']} تحويل، "
-        f"ZIP {'نعم' if settings['zip'] else 'لا'}."
+        f"\nSelected: mono MP3, CBR {settings['bitrate']} kbps, "
+        f"{settings['sample_rate']} Hz, {settings['download_workers']} downloads, "
+        f"{settings['convert_workers']} encoder(s), "
+        f"ZIP {'yes' if settings['zip'] else 'no'}."
     )
 
 
@@ -232,7 +232,7 @@ def _yes_no(input_fn: Input, prompt: str, default: bool) -> bool:
         value = input_fn(prompt).strip().lower()
         if not value:
             return default
-        if value in {"y", "yes", "نعم", "ن"}:
+        if value in {"y", "yes"}:
             return True
-        if value in {"n", "no", "لا", "ل"}:
+        if value in {"n", "no"}:
             return False

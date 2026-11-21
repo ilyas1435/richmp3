@@ -19,8 +19,12 @@ class InteractiveWizardTests(unittest.TestCase):
         return result, output
 
     def test_recommended_lecture_profile_uses_compatible_phone_settings(self) -> None:
-        result, _ = self.run_wizard(["", "", "", "", "https://example.test/list", ""])
+        result, output = self.run_wizard(
+            ["", "", "", "", "https://example.test/list", ""]
+        )
         self.assertIsNotNone(result)
+        self.assertTrue(any("Quick audio setup" in line for line in output))
+        self.assertFalse(any(any("\u0600" <= char <= "\u06ff" for char in line) for line in output))
         assert result is not None
         urls, settings = result
         self.assertEqual(urls, ["https://example.test/list"])
@@ -36,8 +40,8 @@ class InteractiveWizardTests(unittest.TestCase):
 
     def test_custom_profile_and_multiple_urls(self) -> None:
         result, _ = self.run_wizard(
-            ["4", "20", "16000", "1", "/tmp/audio", "نعم",
-             "https://example.test/a https://example.test/b", "نعم"]
+            ["4", "20", "16000", "1", "/tmp/audio", "yes",
+             "https://example.test/a https://example.test/b", "yes"]
         )
         self.assertIsNotNone(result)
         assert result is not None
@@ -51,17 +55,17 @@ class InteractiveWizardTests(unittest.TestCase):
 
     def test_user_can_cancel_before_starting(self) -> None:
         result, output = self.run_wizard(
-            ["1", "1", "", "", "https://example.test", "لا"]
+            ["1", "1", "", "", "https://example.test", "no"]
         )
         self.assertIsNone(result)
-        self.assertTrue(any("أُلغي" in line for line in output))
+        self.assertTrue(any("Cancelled" in line for line in output))
 
     def test_invalid_url_quotes_are_reported(self) -> None:
         result, output = self.run_wizard(
             ["2", "2", "", "", '"https://example.test', ""]
         )
         self.assertIsNone(result)
-        self.assertTrue(any("علامات الاقتباس" in line for line in output))
+        self.assertTrue(any("quotation marks" in line for line in output))
 
     def test_settings_shortcut_saves_defaults_and_preserves_other_values(self) -> None:
         with TemporaryDirectory() as tmp:

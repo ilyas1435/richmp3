@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -27,8 +28,18 @@ from .ui import UIContext, build_ui, print_dry_run, print_summary
 from .utils import Log, parse_rate
 
 EXAMPLES = """\
-examples:
+commands:
+  richmp3                         open the interactive menu
+  richmp3 download URL            download a track or playlist
+  richmp3 settings                change and save defaults
+  richmp3 update                  check GitHub and pull safe updates
+  richmp3 help                    show all download options
+
+download examples:
   richmp3 "https://www.youtube.com/playlist?list=..."
+  richmp3 download URL
+  richmp3 settings
+  richmp3 update
   richmp3 -b 32 -r 22050 --no-zip URL1 URL2
   richmp3 --format opus -b 24 -o ~/Music URL
   richmp3 --dry-run URL          show what would be created
@@ -192,8 +203,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    command_line = list(sys.argv[1:] if argv is None else argv)
+    if not command_line:
+        return _interactive_home()
+    command_line = _normalize_command(command_line)
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(command_line)
     console = Console(highlight=False)
 
     if args.update:
@@ -211,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
                 config_path=Path(args.config) if args.config else None,
             )
         except (OSError, ValueError) as exc:
-            console.print(f"تعذر حفظ الإعدادات: {exc}")
+            console.print(f"Could not save settings: {exc}")
             return 1
         return 0
 
@@ -222,17 +237,17 @@ def main(argv: list[str] | None = None) -> int:
         try:
             result = configure_interactively()
         except KeyboardInterrupt:
-            console.print("\nتم إلغاء الإعداد.")
+            console.print("\nSetup cancelled.")
             return 130
         except EOFError:
-            console.print("\nانتهى الإدخال قبل إدخال الروابط.")
+            console.print("\nInput ended before a URL was entered.")
             return 130
         if result is None:
             return 0
         wizard_urls, wizard_settings = result
         args.urls = wizard_urls
     elif not args.urls:
-        parser.error("provide at least one URL, or use --wizard")
+        parser.error("provide a URL or run 'richmp3' to open the interactive menu")
 
     try:
         config_file = Path(args.config) if args.config else config_path_default()
@@ -301,6 +316,48 @@ def main(argv: list[str] | None = None) -> int:
     if failures or not context.playlists:
         return 1
     return 0
+
+
+def _normalize_command(argv: list[str]) -> list[str]:
+    """Translate friendly commands into the existing argparse actions."""
+    command, *rest = argv
+    aliases = {
+        "settings": "--settings",
+        "update": "--update",
+        "wizard": "--wizard",
+        "help": "--help",
+        "version": "--version",
+    }
+    if command == "download":
+        return rest
+    if command in aliases:
+        return [aliases[command], *rest]
+    return argv
+
+
+def _interactive_home() -> int:
+    console = Console(highlight=False)
+    while True:
+        console.print(f"\nRichMP3 {__version__}")
+        console.print("  1) Download")
+        console.print("  2) Change and save settings")
+        console.print("  3) Check for updates")
+        console.print("  4) Exit")
+        try:
+            choice = input("Choose an option [1-4]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("Menu closed.")
+            return 0
+        actions = {
+            "1": ["--wizard"],
+            "2": ["--settings"],
+            "3": ["--update"],
+            "4": None,
+        }
+        if choice in actions:
+            action = actions[choice]
+            return 0 if action is None else main(action)
+        console.print("Choose 1, 2, 3, or 4.")
 
 
 def _require_ffmpeg(console: Console) -> None:

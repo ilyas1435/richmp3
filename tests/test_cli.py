@@ -3,8 +3,13 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+from contextlib import redirect_stdout
+from io import StringIO
+import tomllib
 
-from richmp3.cli import _build_settings, build_parser
+from richmp3 import __version__
+from richmp3.cli import _build_settings, _normalize_command, build_parser, main
 from richmp3.config import config_path_default, finalize, load_config
 from richmp3.downloader import _FORMAT_SELECTOR
 
@@ -36,6 +41,27 @@ class CliSettingsTests(unittest.TestCase):
     def test_settings_and_update_commands_need_no_url(self) -> None:
         self.assertTrue(self.parse(["--settings"]).settings)
         self.assertTrue(self.parse(["--update"]).update)
+
+    def test_friendly_commands_map_to_cli_actions(self) -> None:
+        self.assertEqual(_normalize_command(["update"]), ["--update"])
+        self.assertEqual(_normalize_command(["settings", "--config", "my.toml"]),
+                         ["--settings", "--config", "my.toml"])
+        self.assertEqual(_normalize_command(["download", "URL", "-b", "24"]),
+                         ["URL", "-b", "24"])
+        self.assertEqual(_normalize_command(["help"]), ["--help"])
+
+    def test_running_without_arguments_opens_english_menu(self) -> None:
+        output = StringIO()
+        with patch("builtins.input", return_value="4"), redirect_stdout(output):
+            self.assertEqual(main([]), 0)
+        self.assertIn("Change and save settings", output.getvalue())
+        self.assertNotRegex(output.getvalue(), r"[\u0600-\u06FF]")
+
+    def test_project_and_runtime_versions_match(self) -> None:
+        with Path("pyproject.toml").open("rb") as config_file:
+            config = tomllib.load(config_file)
+        self.assertEqual(__version__, config["project"]["version"])
+        self.assertEqual(__version__, "1.4.0")
 
     def test_flags_override(self) -> None:
         settings, _ = finalize(

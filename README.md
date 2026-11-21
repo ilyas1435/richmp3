@@ -58,33 +58,51 @@ Overall █████████████░░░░░░░░░░░
 - FFmpeg (with `libmp3lame`, and `libopus` if you use `--format opus`)
 - `rich` and `yt-dlp` (installed as package dependencies)
 
-Termux:
+### Install on Termux
+
+This one-time command installs the launcher and its dependencies. It uses the
+public GitHub repository and keeps the editable checkout in Termux home so
+`richmp3 update` can update it later:
 
 ```bash
-pkg install python ffmpeg git
-python -m pip install rich yt-dlp
+pkg update -y && pkg install -y git && \
+mkdir -p "$HOME/.local/share" && \
+git clone --depth 1 https://github.com/ilyas1435/richmp3.git "$HOME/.local/share/richmp3" && \
+bash "$HOME/.local/share/richmp3/install_termux.sh"
 ```
 
-From this repository:
+The installer creates a virtual environment, installs Python and FFmpeg
+dependencies, and adds `richmp3` to Termux's command path. After installation,
+run `richmp3` to open the menu. This initial clone command is for first-time
+installation; use `richmp3 update` for later updates.
+
+### Install from a local checkout
 
 ```bash
 python -m pip install -e .
-richmp3 --version
+richmp3 version
 # or, without installing:
-python -m richmp3 --version
+python -m richmp3 version
 ```
 
 ## Quick start
 
 ```bash
-# Friendly menu for speech quality and phone-safe download settings
-python -m richmp3 --wizard
+# Open the interactive menu
+richmp3
 
-# Change and save defaults without downloading
-python -m richmp3 --settings
+# Download from the interactive wizard
+richmp3 wizard
 
-# Check GitHub and fast-forward this clean checkout
-python -m richmp3 --update
+# Change and save defaults
+richmp3 settings
+
+# Check GitHub and safely pull fast-forward updates
+richmp3 update
+
+# Show version and all commands
+richmp3 version
+richmp3 help
 
 # Default: MP3, ABR 24 kbps, 11025 Hz, mono, ZIP enabled
 richmp3 "https://www.youtube.com/playlist?list=..."
@@ -117,14 +135,13 @@ players. Wizard choices apply to that run; normal configuration-file and CLI
 options remain available.
 
 The saved settings menu stores choices in the active `richmp3.toml` or the
-user config at `~/.config/richmp3/config.toml`. Run it again with
-`python -m richmp3 --settings`; command-line options still override saved
-values.
+user config at `~/.config/richmp3/config.toml`. Run `richmp3 settings` to edit
+them; command-line options still override saved values.
 
-`python -m richmp3 --update` checks the configured GitHub upstream and pulls
+`richmp3 update` checks the configured GitHub upstream and pulls
 only when the checkout is clean and can be fast-forwarded. It never stashes,
 resets, or merges conflicting work. If dependencies change, it tells you to
-run `python -m pip install -e .`. Restart RichMP3 after an update.
+reinstall them in the project environment. Restart RichMP3 after an update.
 The updater requires running from a Git checkout with an upstream branch
 configured; a wheel-only installation cannot update its source files.
 

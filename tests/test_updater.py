@@ -71,7 +71,7 @@ class UpdaterTests(unittest.TestCase):
         result = update_from_github(self.local)
         self.assertTrue(result.ok)
         self.assertFalse(result.updated)
-        self.assertIn("محدّث بالفعل", result.message)
+        self.assertIn("already up to date", result.message)
 
     def test_refuses_to_update_a_dirty_checkout(self) -> None:
         (self.writer / "new-file.txt").write_text("updated\n", encoding="utf-8")
@@ -83,7 +83,7 @@ class UpdaterTests(unittest.TestCase):
         result = update_from_github(self.local)
 
         self.assertFalse(result.ok)
-        self.assertIn("تغييرات محلية", result.message)
+        self.assertIn("local changes", result.message)
         self.assertFalse((self.local / "new-file.txt").exists())
         self.assertEqual((self.local / "README.md").read_text(), "my local change\n")
 
@@ -97,7 +97,7 @@ class UpdaterTests(unittest.TestCase):
 
         self.assertTrue(result.updated)
         self.assertTrue(result.dependencies_changed)
-        self.assertIn("pip install -e .", result.message)
+        self.assertIn("pip install -e", result.message)
 
 
 if __name__ == "__main__":

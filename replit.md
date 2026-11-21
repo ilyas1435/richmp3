@@ -13,16 +13,17 @@ Keep its existing structure and stack.
 - Alternatively, use Shell:
 
   ```sh
-  python -m richmp3 --wizard
+  python -m richmp3 wizard
   python -m richmp3 "https://example.org/audio.mp3"
   python -m richmp3 --no-zip -b 64 "https://example.org/audio.mp3"
-  python -m richmp3 --help
+  python -m richmp3 help
   ```
 
 The wizard offers speech-focused MP3 quality profiles and phone-friendly
 download settings. In the Run console, enter `:menu` for a one-time setup,
 `:settings` to change and save defaults, or `:update` to fast-forward from the
-configured GitHub upstream when the checkout is clean.
+configured GitHub upstream when the checkout is clean. On Termux, install via
+`install_termux.sh`, then use `richmp3`, `richmp3 settings`, or `richmp3 update`.
 
 The URLs above are placeholders; replace them with media you have permission
 to download. If console input is unavailable, use the Shell commands instead.
@@ -45,7 +46,7 @@ The Run launcher delegates to the unchanged CLI.
 
 ```sh
 python -m unittest discover -s tests -v
-python -m richmp3 --version
+python -m richmp3 version
 ```
 
 The suite includes real FFmpeg conversion tests and offline pipeline tests.
