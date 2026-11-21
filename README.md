@@ -22,12 +22,12 @@ Overall █████████████░░░░░░░░░░░
 
 ## Features
 
-- **Bandwidth-first download** — strictly the lowest-bandwidth `worstaudio`
-  stream (original-language only, dubs filtered), preferring `m4a`/`webm`
-  containers that demux fastest, with `worst`/`best` only as a last resort for
-  sites that expose a single progressive file.
-- **Original language track** — dubbed/localised audio is filtered out with
-  yt-dlp's `language_preference` metadata; the original or default track wins.
+- **Bandwidth-first download** — chooses the smallest audio-only stream for
+  the selected language, then converts it to the requested compact format.
+- **Original language by default** — explicitly marked original tracks are
+  preferred. If a source exposes several languages but does not identify the
+  original, RichMP3 stops and explains how to choose instead of silently
+  downloading a dub.
 - **Configurable encoding** — 8–128 kbps, 8000–44100 Hz, always mono.
   Default: MP3, ABR 24 kbps, 11025 Hz, LAME `-compression_level 5`.
 - **Voice-clarity filter** — at ≤16 kHz, `highpass=f=100,lowpass=f=5000` strips
@@ -110,11 +110,21 @@ richmp3 "https://www.youtube.com/playlist?list=..."
 # Several URLs in one run
 richmp3 URL1 URL2
 
+# List audio languages and choose one
+richmp3 languages URL
+richmp3 download --choose-audio URL
+richmp3 download --audio-language ar URL
+
 # Higher quality, no archive
 richmp3 -b 64 -r 22050 --no-zip URL
 
 # Better quality per byte at low bitrates (Opus, 8-128 kbps)
 richmp3 -f opus -b 24 URL
+
+# List available audio tracks, then choose a language
+richmp3 languages URL
+richmp3 download --audio-language ar URL
+richmp3 download --choose-audio URL
 
 # Preview planned filenames; touches nothing and needs no FFmpeg
 richmp3 --dry-run URL
@@ -127,7 +137,7 @@ richmp3 --cookies ~/cookies.txt URL
 ```
 
 The wizard offers MP3 speech presets, phone workload presets, an output
-directory and an optional ZIP. Its recommended lecture profile is mono MP3
+directory, audio language, and an optional ZIP. Its recommended lecture profile is mono MP3
 CBR at 24 kbps and 11025 Hz, with a conservative two download workers and one
 encoder. The smaller 16 kbps profile saves more space but reduces speech
 clarity. MP3 is chosen instead of Opus for broader compatibility with older
@@ -170,6 +180,7 @@ Exit codes: `0` success, `1` one or more failures, `2` setup error
 | download workers | `4` | parallel tracks |
 | encode workers | CPU/2, max 4 | caps simultaneous FFmpeg processes (`-threads 1` each) |
 | concurrent fragments | `8` | parallel HLS/DASH fragment fetches |
+| audio language | `original` | prefers original; use `richmp3 languages URL` to list alternatives |
 | ZIP | on | `stored` by default (audio does not compress) |
 | source folder | removed after ZIP | `--keep-folder` keeps it |
 
@@ -226,6 +237,7 @@ output = "~/Music/richmp3"
 bitrate = 24
 sample_rate = 11025
 format = "mp3"        # mp3 | opus
+audio_language = "original" # original, or a code such as en or ar
 mode = "abr"          # abr | cbr
 voice_filter = true   # strip rumble/hiss at <=16 kHz (clearer voice, smaller files)
 download_workers = 4

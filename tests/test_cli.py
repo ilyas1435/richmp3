@@ -11,7 +11,25 @@ import tomllib
 from richmp3 import __version__
 from richmp3.cli import _build_settings, _normalize_command, build_parser, main
 from richmp3.config import config_path_default, finalize, load_config
-from richmp3.downloader import _FORMAT_SELECTOR
+from richmp3.downloader import (
+    DownloadError,
+    _audio_format_selector,
+    audio_language_options,
+)
+
+
+class _QuietLog:
+    def info(self, _message: str) -> None:
+        pass
+
+    def debug(self, _message: str) -> None:
+        pass
+
+    def warning(self, _message: str) -> None:
+        pass
+
+    def error(self, _message: str) -> None:
+        pass
 
 
 class CliSettingsTests(unittest.TestCase):
@@ -28,6 +46,7 @@ class CliSettingsTests(unittest.TestCase):
         self.assertTrue(settings.zip_output)
         self.assertEqual(settings.mode_label, "ABR")
         self.assertTrue(settings.voice_filter)
+        self.assertEqual(settings.audio_language, "original")
         self.assertEqual(settings.js_runtime, "auto")
         self.assertFalse(settings.keep_folder)
         self.assertEqual(settings.concurrent_fragments, 8)
@@ -49,6 +68,10 @@ class CliSettingsTests(unittest.TestCase):
         self.assertEqual(_normalize_command(["download", "URL", "-b", "24"]),
                          ["URL", "-b", "24"])
         self.assertEqual(_normalize_command(["help"]), ["--help"])
+        self.assertEqual(
+            _normalize_command(["languages", "URL"]),
+            ["--list-audio-languages", "URL"],
+        )
 
     def test_running_without_arguments_opens_english_menu(self) -> None:
         output = StringIO()
@@ -57,11 +80,41 @@ class CliSettingsTests(unittest.TestCase):
         self.assertIn("Change and save settings", output.getvalue())
         self.assertNotRegex(output.getvalue(), r"[\u0600-\u06FF]")
 
+    def test_languages_command_displays_english_track_choices(self) -> None:
+        choices = [
+            {
+                "language": "en",
+                "label": "Original track",
+                "original": True,
+                "default": False,
+                "format_id": "251-0",
+            },
+            {
+                "language": "ar",
+                "label": "Audio track",
+                "original": False,
+                "default": False,
+                "format_id": "251-1",
+            },
+        ]
+        output = StringIO()
+        with (
+            patch(
+                "richmp3.cli.Downloader.list_audio_languages",
+                return_value=choices,
+            ),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(main(["languages", "https://example.test/video"]), 0)
+        self.assertIn("en: Original track (original)", output.getvalue())
+        self.assertIn("ar: Audio track", output.getvalue())
+        self.assertNotRegex(output.getvalue(), r"[\u0600-\u06FF]")
+
     def test_project_and_runtime_versions_match(self) -> None:
         with Path("pyproject.toml").open("rb") as config_file:
             config = tomllib.load(config_file)
         self.assertEqual(__version__, config["project"]["version"])
-        self.assertEqual(__version__, "1.4.0")
+        self.assertEqual(__version__, "1.5.0")
 
     def test_flags_override(self) -> None:
         settings, _ = finalize(
@@ -118,6 +171,27 @@ class CliSettingsTests(unittest.TestCase):
         self.assertEqual(settings.download_workers, 6)
         self.assertEqual(settings.mode_label, "VBR")
 
+    def test_audio_language_can_be_saved_and_overridden(self) -> None:
+        saved, _ = finalize(
+            _build_settings(self.parse(["URL"]), {"audio_language": "ar"})
+        )
+        self.assertEqual(saved.audio_language, "ar")
+        command_line, _ = finalize(
+            _build_settings(
+                self.parse(["--audio-language", "en-US", "URL"]),
+                {"audio_language": "ar"},
+            )
+        )
+        self.assertEqual(command_line.audio_language, "en-US")
+
+    def test_invalid_audio_language_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            finalize(
+                _build_settings(
+                    self.parse(["--audio-language", "not a code", "URL"]), {}
+                )
+            )
+
     def test_invalid_config_bool(self) -> None:
         with self.assertRaises(ValueError):
             _build_settings(self.parse(["URL"]), {"zip": "yes"})
@@ -150,14 +224,44 @@ class CliSettingsTests(unittest.TestCase):
         path = config_path_default()
         self.assertTrue(path is None or path.is_file())
 
-    def test_format_selector_is_strict_worstaudio(self) -> None:
-        self.assertIn("worstaudio", _FORMAT_SELECTOR)
-        self.assertIn("language_preference>0", _FORMAT_SELECTOR)
-        self.assertIn("worstaudio[ext=m4a]", _FORMAT_SELECTOR)
-        self.assertIn("worstaudio[ext=webm]", _FORMAT_SELECTOR)
-        self.assertNotIn("bestaudio", _FORMAT_SELECTOR)
-        self.assertTrue(_FORMAT_SELECTOR.startswith("worstaudio[ext=m4a]"))
-        self.assertTrue(_FORMAT_SELECTOR.endswith("/worst/best"))
+    def test_default_audio_prefers_explicit_original_track(self) -> None:
+        log = _QuietLog()
+        select = _audio_format_selector("original", log)
+        dub = {"format_id": "251-1", "language": "fr", "format_note": "French", "acodec": "opus", "vcodec": "none", "abr": 32}
+        original = {"format_id": "251-0", "language": "de", "format_note": "German (original)", "acodec": "opus", "vcodec": "none", "abr": 48}
+        selected = select({"formats": [dub, original]})
+        self.assertEqual(selected, [original])
+
+    def test_default_does_not_guess_when_multiple_languages_are_unmarked(self) -> None:
+        select = _audio_format_selector("original", _QuietLog())
+        formats = [
+            {"format_id": "a", "language": "en", "acodec": "opus", "vcodec": "none"},
+            {"format_id": "b", "language": "fr", "acodec": "opus", "vcodec": "none"},
+        ]
+        with self.assertRaisesRegex(DownloadError, "Could not identify the original"):
+            select({"formats": formats})
+
+    def test_manual_language_selects_smallest_matching_track(self) -> None:
+        select = _audio_format_selector("ar", _QuietLog())
+        arabic_high = {"format_id": "ar2", "language": "ar-SA", "acodec": "opus", "vcodec": "none", "abr": 48}
+        arabic_low = {"format_id": "ar1", "language": "ar", "acodec": "opus", "vcodec": "none", "abr": 32}
+        english = {"format_id": "en", "language": "en", "acodec": "opus", "vcodec": "none", "abr": 24}
+        self.assertEqual(
+            select({"formats": [arabic_high, english, arabic_low]}),
+            [arabic_low],
+        )
+
+    def test_language_listing_marks_original_and_groups_formats(self) -> None:
+        formats = [
+            {"format_id": "251-0", "language": "en", "format_note": "English (original)", "acodec": "opus", "vcodec": "none", "language_preference": 10},
+            {"format_id": "140", "language": "en", "format_note": "English (original)", "acodec": "aac", "vcodec": "none", "language_preference": 10},
+            {"format_id": "251-1", "language": "ar", "format_note": "Arabic", "acodec": "opus", "vcodec": "none"},
+            {"format_id": "137", "language": "en", "format_note": "English video", "acodec": "none", "vcodec": "avc1"},
+        ]
+        choices = audio_language_options(formats)
+        self.assertEqual([choice["language"] for choice in choices], ["en", "ar"])
+        self.assertTrue(choices[0]["original"])
+        self.assertEqual(choices[0]["format_count"], 2)
 
 
 if __name__ == "__main__":

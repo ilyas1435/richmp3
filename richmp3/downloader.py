@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import math
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -13,21 +14,6 @@ from .models import Playlist, Track
 from .utils import Cancelled, Log, parse_rate
 
 ProgressCallback = Callable[[float, int, int | None, float | None, float | None], None]
-
-# Strictly prefer the lowest-bandwidth audio stream.  m4a (AAC) and webm (Opus)
-# are tried first because FFmpeg demuxes/decodes them fastest; the
-# language_preference filter keeps the original track instead of an AI dub
-# (YouTube sets 10 for original, 5 for default, -1 for dubs).  `worst`/`best`
-# is only a last resort for sites that expose a single progressive file.
-_FORMAT_SELECTOR = (
-    "worstaudio[ext=m4a][language_preference>0]/"
-    "worstaudio[ext=webm][language_preference>0]/"
-    "worstaudio[language_preference>0]/"
-    "worstaudio[ext=m4a]/"
-    "worstaudio[ext=webm]/"
-    "worstaudio/worst/best"
-)
-
 
 class DownloadError(RuntimeError):
     pass
@@ -211,6 +197,21 @@ class Downloader:
         self.log.info(f"Resolved playlist '{title}' with {len(tracks)} tracks")
         return Playlist(url=url, title=title, uploader=uploader, tracks=tracks)
 
+    def list_audio_languages(self, url: str) -> list[dict[str, object]]:
+        """Return available audio-language choices for a single media URL."""
+        import yt_dlp
+
+        options = self._common_options()
+        options.update({"noplaylist": True, "skip_download": True})
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=False)
+        except Exception as exc:
+            raise DownloadError(_clean_error(exc)) from exc
+        if not info:
+            raise DownloadError("No media information returned for this URL")
+        return audio_language_options(info.get("formats") or [])
+
     # -- downloading ----------------------------------------------------------
 
     def download(
@@ -257,7 +258,7 @@ class Downloader:
         options = self._common_options()
         options.update(
             {
-                "format": _FORMAT_SELECTOR,
+                "format": _audio_format_selector(self.settings.audio_language, self.log),
                 "outtmpl": str(temp_dir / f"raw-{track.index:04d}.%(ext)s"),
                 "noplaylist": True,
                 "overwrites": True,
@@ -296,6 +297,158 @@ class Downloader:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _audio_format_selector(language: str, log: Log):
+    """Build a yt-dlp selector that avoids silently choosing a dubbed track."""
+
+    def select(context: dict) -> list[dict]:
+        all_audio = [
+            fmt
+            for fmt in context.get("formats", [])
+            if fmt.get("acodec") not in (None, "none")
+        ]
+        formats = [fmt for fmt in all_audio if fmt.get("vcodec") in (None, "none")]
+        if not formats:
+            # Some extractors expose only a progressive file with audio+video.
+            formats = all_audio
+        if not formats:
+            return []
+
+        requested = language.strip()
+        if requested.casefold() == "original":
+            candidates = [
+                fmt for fmt in formats
+                if "original" in str(fmt.get("format_note") or "").casefold()
+                or _as_float(fmt.get("language_preference")) is not None
+                and _as_float(fmt.get("language_preference")) >= 10
+            ]
+            if not candidates:
+                known_languages = {
+                    str(fmt["language"]).casefold()
+                    for fmt in formats
+                    if fmt.get("language")
+                }
+                if len(known_languages) > 1:
+                    choices = ", ".join(sorted(known_languages))
+                    raise DownloadError(
+                        "Could not identify the original audio track. "
+                        f"Available language codes: {choices}. "
+                        "Run 'richmp3 languages URL', then use "
+                        "'--audio-language CODE' to choose one."
+                    )
+                candidates = formats
+        else:
+            candidates = [
+                fmt for fmt in formats
+                if _language_matches(fmt.get("language"), requested)
+            ]
+            if not candidates:
+                choices = ", ".join(
+                    sorted({
+                        str(fmt["language"])
+                        for fmt in formats
+                        if fmt.get("language")
+                    })
+                )
+                suffix = f" Available language codes: {choices}." if choices else ""
+                raise DownloadError(
+                    f"No audio track matched language '{requested}'.{suffix}"
+                )
+
+        chosen = min(candidates, key=_audio_size_key)
+        code = chosen.get("language") or "unknown"
+        note = str(chosen.get("format_note") or "").casefold()
+        preference = _as_float(chosen.get("language_preference")) or 0
+        label = (
+            "original"
+            if "original" in note or preference >= 10
+            else "default"
+            if "default" in note or preference == 5
+            else "selected"
+        )
+        log.info(f"Selected audio language: {code} ({label})")
+        return [chosen]
+
+    return select
+
+
+def _audio_language_options(formats: list[dict]) -> list[dict[str, object]]:
+    """Collapse audio formats into one selectable row per language code."""
+    grouped: dict[str, list[dict]] = {}
+    for fmt in formats:
+        if (
+            fmt.get("acodec") in (None, "none")
+            or fmt.get("vcodec") not in (None, "none")
+            or not fmt.get("language")
+        ):
+            continue
+        code = str(fmt["language"])
+        grouped.setdefault(code, []).append(fmt)
+
+    result: list[dict[str, object]] = []
+    for code, choices in grouped.items():
+        representative = max(
+            choices,
+            key=lambda fmt: (
+                "original" in str(fmt.get("format_note") or "").casefold()
+                or (_as_float(fmt.get("language_preference")) or 0) >= 10,
+                _as_float(fmt.get("language_preference")) or 0,
+            ),
+        )
+        note = str(representative.get("format_note") or "").casefold()
+        is_original = (
+            "original" in note
+            or (_as_float(representative.get("language_preference")) or 0) >= 10
+        )
+        is_default = (
+            "default" in note
+            or (_as_float(representative.get("language_preference")) or 0) == 5
+        )
+        result.append({
+            "language": code,
+            "label": (
+                "Original track"
+                if is_original
+                else "Default track"
+                if is_default
+                else "Audio track"
+            ),
+            "original": is_original,
+            "default": is_default,
+            "format_id": representative.get("format_id"),
+            "format_count": len(choices),
+        })
+    return sorted(
+        result,
+        key=lambda item: (
+            not bool(item["original"]),
+            str(item["language"]).casefold(),
+        ),
+    )
+
+
+def audio_language_options(formats: list[dict]) -> list[dict[str, object]]:
+    """Public helper for formatting language choices in the CLI."""
+    return _audio_language_options(formats)
+
+
+def _language_matches(value: object, requested: str) -> bool:
+    if not value:
+        return False
+    actual = str(value).replace("_", "-").casefold()
+    requested = requested.replace("_", "-").casefold()
+    return actual == requested or actual.startswith(f"{requested}-")
+
+
+def _audio_size_key(fmt: dict) -> tuple[float, float, str]:
+    bitrate = _as_float(fmt.get("abr") or fmt.get("tbr"))
+    size = _as_float(fmt.get("filesize") or fmt.get("filesize_approx"))
+    return (
+        bitrate if bitrate is not None else math.inf,
+        size if size is not None else math.inf,
+        str(fmt.get("format_id") or ""),
+    )
 
 
 def _final_path(ydl, info: dict, temp_dir: Path, index: int) -> Path:

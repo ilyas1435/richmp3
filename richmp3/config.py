@@ -47,6 +47,7 @@ CONFIG_KEYS = frozenset(
         "log_file",
         "timeout",
         "concurrent_fragments",
+        "audio_language",
     }
 )
 
@@ -70,6 +71,7 @@ class Settings:
     audio_format: str = "mp3"
     mode: str = "abr"
     voice_filter: bool = True
+    audio_language: str = "original"
 
     download_workers: int = 4
     convert_workers: int = default_convert_workers()
@@ -131,6 +133,12 @@ def finalize(settings: Settings) -> tuple[Settings, list[str]]:
     """Clamp/snap values and return (settings, human-readable notices)."""
     notices: list[str] = []
 
+    audio_language = str(settings.audio_language).strip()
+    if not _is_valid_audio_language(audio_language):
+        raise ValueError(
+            "audio_language must be 'original' or a language code such as 'en' or 'ar'"
+        )
+
     bitrate = max(BITRATE_MIN, min(BITRATE_MAX, settings.bitrate))
     if bitrate != settings.bitrate:
         notices.append(f"Bitrate {settings.bitrate} kbps clamped to {bitrate} kbps")
@@ -175,6 +183,7 @@ def finalize(settings: Settings) -> tuple[Settings, list[str]]:
     normalized = replace(
         settings,
         output=Path(settings.output).expanduser(),
+        audio_language=audio_language,
         bitrate=bitrate,
         sample_rate=sample_rate,
         download_workers=workers,
@@ -187,6 +196,18 @@ def finalize(settings: Settings) -> tuple[Settings, list[str]]:
         log_file=Path(settings.log_file).expanduser() if settings.log_file else None,
     )
     return normalized, notices
+
+
+def _is_valid_audio_language(value: str) -> bool:
+    if value.casefold() == "original":
+        return True
+    parts = value.replace("_", "-").split("-")
+    return (
+        1 <= len(parts) <= 3
+        and 2 <= len(parts[0]) <= 3
+        and parts[0].isalpha()
+        and all(1 <= len(part) <= 8 and part.isalnum() for part in parts[1:])
+    )
 
 
 def load_config(path: Path) -> dict[str, Any]:

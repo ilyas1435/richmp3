@@ -20,7 +20,7 @@ class InteractiveWizardTests(unittest.TestCase):
 
     def test_recommended_lecture_profile_uses_compatible_phone_settings(self) -> None:
         result, output = self.run_wizard(
-            ["", "", "", "", "https://example.test/list", ""]
+            ["", "", "", "", "", "https://example.test/list", ""]
         )
         self.assertIsNotNone(result)
         self.assertTrue(any("Quick audio setup" in line for line in output))
@@ -35,12 +35,13 @@ class InteractiveWizardTests(unittest.TestCase):
         self.assertEqual(settings["download_workers"], 2)
         self.assertEqual(settings["convert_workers"], 1)
         self.assertEqual(settings["concurrent_fragments"], 4)
+        self.assertEqual(settings["audio_language"], "original")
         self.assertFalse(settings["zip"])
         self.assertTrue(settings["voice_filter"])
 
     def test_custom_profile_and_multiple_urls(self) -> None:
         result, _ = self.run_wizard(
-            ["4", "20", "16000", "1", "/tmp/audio", "yes",
+            ["4", "20", "16000", "1", "", "/tmp/audio", "yes",
              "https://example.test/a https://example.test/b", "yes"]
         )
         self.assertIsNotNone(result)
@@ -55,14 +56,14 @@ class InteractiveWizardTests(unittest.TestCase):
 
     def test_user_can_cancel_before_starting(self) -> None:
         result, output = self.run_wizard(
-            ["1", "1", "", "", "https://example.test", "no"]
+            ["1", "1", "", "", "", "https://example.test", "no"]
         )
         self.assertIsNone(result)
         self.assertTrue(any("Cancelled" in line for line in output))
 
     def test_invalid_url_quotes_are_reported(self) -> None:
         result, output = self.run_wizard(
-            ["2", "2", "", "", '"https://example.test', ""]
+            ["2", "2", "", "", "", '"https://example.test', ""]
         )
         self.assertIsNone(result)
         self.assertTrue(any("quotation marks" in line for line in output))
@@ -75,7 +76,7 @@ class InteractiveWizardTests(unittest.TestCase):
                 "\n[custom]\nbitrate = 7\n",
                 encoding="utf-8",
             )
-            remaining = iter(["1", "3", "", "", ""])
+            remaining = iter(["1", "3", "", "", "", ""])
             output: list[str] = []
             saved = save_settings_interactively(
                 input_fn=lambda _prompt: next(remaining),

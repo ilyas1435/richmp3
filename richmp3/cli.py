@@ -21,7 +21,7 @@ from .config import (
     finalize,
     load_config,
 )
-from .downloader import DownloadError
+from .downloader import DownloadError, Downloader
 from .models import Stage
 from .pipeline import Pipeline
 from .ui import UIContext, build_ui, print_dry_run, print_summary
@@ -33,6 +33,7 @@ commands:
   richmp3 download URL            download a track or playlist
   richmp3 settings                change and save defaults
   richmp3 update                  check GitHub and pull safe updates
+  richmp3 languages URL           list available audio languages
   richmp3 help                    show all download options
 
 download examples:
@@ -42,6 +43,8 @@ download examples:
   richmp3 update
   richmp3 -b 32 -r 22050 --no-zip URL1 URL2
   richmp3 --format opus -b 24 -o ~/Music URL
+  richmp3 download --audio-language ar URL
+  richmp3 download --choose-audio URL
   richmp3 --dry-run URL          show what would be created
 """
 
@@ -126,6 +129,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument("--cookies", default=None, help="cookies.txt for restricted media")
+    parser.add_argument(
+        "--audio-language",
+        default=None,
+        help="audio language code, or 'original' (default); list with 'richmp3 languages URL'",
+    )
+    parser.add_argument(
+        "--choose-audio",
+        action="store_true",
+        help="show available audio languages and choose one before downloading",
+    )
+    parser.add_argument(
+        "--list-audio-languages",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--limit-rate", default=None, help="download speed limit, e.g. 500k or 1M")
     parser.add_argument(
         "--js-runtime", choices=("auto", "deno", "node", "bun", "quickjs"), default=None,
@@ -267,6 +285,76 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as exc:
         console.print(Text(f"✗ Cannot write log file: {exc}", style="bold red"))
         return 2
+
+    if args.list_audio_languages:
+        if len(args.urls) != 1:
+            parser.error("'richmp3 languages' requires exactly one media URL")
+        try:
+            languages = Downloader(settings, log).list_audio_languages(args.urls[0])
+        except DownloadError as exc:
+            console.print(Text(f"✗ {exc}", style="bold red"))
+            return 1
+        if not languages:
+            console.print("No audio language metadata was found for this media.")
+            return 0
+        console.print("Available audio languages:")
+        for item in languages:
+            tags = []
+            if item["original"]:
+                tags.append("original")
+            if item["default"]:
+                tags.append("default")
+            detail = f" ({', '.join(tags)})" if tags else ""
+            console.print(
+                f"  {item['language']}: {item['label']}{detail} "
+                f"[format {item['format_id']}]"
+            )
+        console.print("Choose one with: richmp3 download --audio-language CODE URL")
+        return 0
+
+    if args.choose_audio:
+        if len(args.urls) != 1:
+            parser.error("'--choose-audio' requires exactly one media URL")
+        try:
+            languages = Downloader(settings, log).list_audio_languages(args.urls[0])
+        except DownloadError as exc:
+            console.print(Text(f"✗ {exc}", style="bold red"))
+            return 1
+        if not languages:
+            console.print(
+                "No audio language metadata was found. "
+                f"Keeping the configured preference: {settings.audio_language}."
+            )
+        else:
+            console.print("Available audio languages:")
+            for item in languages:
+                tags = []
+                if item["original"]:
+                    tags.append("original")
+                if item["default"]:
+                    tags.append("default")
+                detail = f" ({', '.join(tags)})" if tags else ""
+                console.print(f"  {item['language']}: {item['label']}{detail}")
+            valid = {str(item["language"]) for item in languages}
+            if any(item["original"] for item in languages) or len(languages) == 1:
+                valid.add("original")
+            default = "original" if "original" in valid else ""
+            valid_by_fold = {value.casefold(): value for value in valid}
+            prompt = (
+                f"Choose a language code{f' [{default}]' if default else ''}: "
+            )
+            try:
+                while True:
+                    answer = input(prompt).strip() or default
+                    selected = valid_by_fold.get(answer.casefold())
+                    if selected:
+                        break
+                    console.print("Enter one of the language codes shown above.")
+            except (EOFError, KeyboardInterrupt):
+                console.print("\nAudio selection cancelled.")
+                return 130
+            settings = settings.with_overrides(audio_language=selected)
+
     log.info(f"richmp3 {__version__} starting: {args.urls}")
 
     for notice in notices:
@@ -325,6 +413,7 @@ def _normalize_command(argv: list[str]) -> list[str]:
         "settings": "--settings",
         "update": "--update",
         "wizard": "--wizard",
+        "languages": "--list-audio-languages",
         "help": "--help",
         "version": "--version",
     }
@@ -422,6 +511,9 @@ def _build_settings(args: argparse.Namespace, config: dict[str, Any]) -> Setting
             "sample_rate",
         ),
         audio_format=audio_format,
+        audio_language=str(
+            pick(args.audio_language, cfg.get("audio_language"), default="original")
+        ).strip(),
         mode=mode,
         voice_filter=_as_bool(
             pick(args.voice_filter, cfg.get("voice_filter"), default=True),

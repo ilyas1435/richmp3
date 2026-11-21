@@ -111,6 +111,10 @@ def collect_settings(
     }
     download_workers, convert_workers, fragments = workloads[speed]
 
+    output_fn("\nAudio language:")
+    output_fn("Use 'original' by default, or enter a code from 'richmp3 languages URL'.")
+    audio_language = input_fn("Preferred audio language [original]: ").strip() or "original"
+
     default_output = Path.home() / "RichMP3"
     output_text = input_fn(
         f"\nOutput folder [fast Termux internal storage: {default_output}]: "
@@ -124,6 +128,7 @@ def collect_settings(
     bitrate, sample_rate = bitrate_rate
     return {
         "format": "mp3",
+        "audio_language": audio_language,
         "mode": "cbr",
         "bitrate": bitrate,
         "sample_rate": sample_rate,
@@ -141,6 +146,7 @@ def _print_summary(settings: dict[str, object], output_fn: Output) -> None:
         f"\nSelected: mono MP3, CBR {settings['bitrate']} kbps, "
         f"{settings['sample_rate']} Hz, {settings['download_workers']} downloads, "
         f"{settings['convert_workers']} encoder(s), "
+        f"language {settings['audio_language']}, "
         f"ZIP {'yes' if settings['zip'] else 'no'}."
     )
 
