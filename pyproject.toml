@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "richmp3"
+version = "1.1.0"
+description = "High-performance audio downloader + converter with a Rich terminal UI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = [
+    "rich>=13.0",
+    "yt-dlp>=2024.1.1",
+]
+
+[project.optional-dependencies]
+dev = ["pyflakes>=3.2"]
+
+[project.scripts]
+richmp3 = "richmp3.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["richmp3*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

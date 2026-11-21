@@ -1,0 +1,28 @@
+# RichMP3 example configuration.
+# Copy to ./richmp3.toml or ~/.config/richmp3/config.toml, then edit.
+# Every value here is optional; the values shown are the defaults.
+
+output = "downloads"
+bitrate = 24
+sample_rate = 11025
+format = "mp3"        # mp3 | opus
+mode = "abr"          # abr | cbr (MP3 only; Opus is always VBR)
+
+download_workers = 4
+convert_workers = 4  # lower this on phones to reduce heat/battery use
+playlist = true
+zip = true
+zip_method = "stored" # stored | deflate
+keep_folder = false   # delete the source folder after a successful zip
+
+cookies = ""          # e.g. "~/cookies.txt"
+limit_rate = ""       # e.g. "500k"
+js_runtime = "auto"   # auto | deno | node | bun | quickjs
+remote_components = false  # allow yt-dlp's EJS solver for better YouTube formats
+retries = 3
+number_width = 0      # 0 = auto, minimum 4 digits
+overwrite = false
+timeout = 30
+concurrent_fragments = 8
+log_file = ""         # e.g. "~/richmp3.log"
+no_ui = false
