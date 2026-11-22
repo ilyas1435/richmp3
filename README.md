@@ -147,6 +147,10 @@ On Termux, the default output is `~/storage/shared/Download`; run
 `termux-setup-storage` and grant access once. On other systems it defaults to
 `./downloads`.
 
+In the interactive menu, **Download** asks for a URL and uses saved settings;
+**Change and save settings** edits future defaults. Run `richmp3 wizard` when
+you want to choose settings for one download.
+
 The wizard offers MP3 VBR, ABR and CBR modes, speech-quality presets, phone
 workload presets, an output directory, audio language, and an optional ZIP.
 Its default lecture profile is VBR Q7 at 11025 Hz. The maximum-speed preset

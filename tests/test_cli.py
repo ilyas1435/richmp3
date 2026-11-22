@@ -9,7 +9,13 @@ from io import StringIO
 import tomllib
 
 from richmp3 import __version__
-from richmp3.cli import _build_settings, _normalize_command, build_parser, main
+from richmp3.cli import (
+    _build_settings,
+    _interactive_home,
+    _normalize_command,
+    build_parser,
+    main,
+)
 from richmp3.config import (
     config_path_default,
     default_convert_workers,
@@ -106,7 +112,24 @@ class CliSettingsTests(unittest.TestCase):
         with patch("builtins.input", return_value="6"), redirect_stdout(output):
             self.assertEqual(main([]), 0)
         self.assertIn("Change and save settings", output.getvalue())
+        self.assertIn("Download using saved settings", output.getvalue())
         self.assertNotRegex(output.getvalue(), r"[\u0600-\u06FF]")
+
+    def test_menu_download_uses_saved_settings_instead_of_settings_wizard(self) -> None:
+        with (
+            patch("builtins.input", side_effect=["1", "https://example.test/audio"]),
+            patch("richmp3.cli.main", return_value=0) as run_command,
+        ):
+            self.assertEqual(_interactive_home(), 0)
+        run_command.assert_called_once_with(["https://example.test/audio"])
+
+    def test_menu_settings_choice_opens_only_the_settings_flow(self) -> None:
+        with (
+            patch("builtins.input", return_value="2"),
+            patch("richmp3.cli.main", return_value=0) as run_command,
+        ):
+            self.assertEqual(_interactive_home(), 0)
+        run_command.assert_called_once_with(["--settings"])
 
     def test_languages_command_displays_english_track_choices(self) -> None:
         choices = [
@@ -142,7 +165,7 @@ class CliSettingsTests(unittest.TestCase):
         with Path("pyproject.toml").open("rb") as config_file:
             config = tomllib.load(config_file)
         self.assertEqual(__version__, config["project"]["version"])
-        self.assertEqual(__version__, "1.7.0")
+        self.assertEqual(__version__, "1.7.1")
 
     def test_flags_override(self) -> None:
         settings, _ = finalize(

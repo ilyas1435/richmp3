@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 import sys
 from pathlib import Path
 from typing import Any
@@ -501,7 +502,7 @@ def _interactive_home() -> int:
     console = Console(highlight=False)
     while True:
         console.print(f"\nRichMP3 {__version__}")
-        console.print("  1) Download")
+        console.print("  1) Download using saved settings")
         console.print("  2) Change and save settings")
         console.print("  3) Check for updates")
         console.print("  4) Save named settings")
@@ -513,12 +514,26 @@ def _interactive_home() -> int:
             console.print("Menu closed.")
             return 0
         actions = {
-            "1": ["--wizard"],
             "2": ["--settings"],
             "3": ["--update"],
             "5": ["--list-profiles"],
             "6": None,
         }
+        if choice == "1":
+            try:
+                raw_urls = input("Enter one or more media URLs: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print("Menu closed.")
+                return 0
+            try:
+                urls = shlex.split(raw_urls)
+            except ValueError:
+                console.print("Could not parse URLs. Check the quotation marks.")
+                continue
+            if not urls:
+                console.print("No URL was entered.")
+                continue
+            return main(urls)
         if choice == "4":
             try:
                 name = input("Short profile name (example: lecture): ").strip()

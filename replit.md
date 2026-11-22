@@ -19,8 +19,9 @@ Keep its existing structure and stack.
   python -m richmp3 help
   ```
 
-The wizard offers speech-focused MP3 quality profiles and phone-friendly
-download settings. In the Run console, enter `:menu` for a one-time setup,
+The command menu's **Download** option asks for a URL and uses saved settings;
+**Change and save settings** edits future defaults. Use `richmp3 wizard` for
+one-time setup options. In the Run console, enter `:menu` for a one-time setup,
 `:settings` to change and save defaults, or `:update` to fast-forward from the
 configured GitHub upstream when the checkout is clean. On Termux, install via
 `install_termux.sh`, then use `richmp3`, `richmp3 settings`, or `richmp3 update`.

@@ -8,11 +8,12 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
@@ -23,9 +24,20 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install FFmpeg
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          case "$RUNNER_OS" in
+            Linux)
+              sudo apt-get update
+              sudo apt-get install -y ffmpeg
+              ;;
+            macOS)
+              brew install ffmpeg
+              ;;
+            Windows)
+              choco install ffmpeg -y --no-progress
+              ;;
+          esac
 
       - name: Install project
         run: |
